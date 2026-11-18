@@ -1,0 +1,3 @@
+# Minimal configuration: the card finds the systolic, diastolic and pulse
+# sensors of your blood pressure monitor by itself.
+type: custom:blood-pressure-card

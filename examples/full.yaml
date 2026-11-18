@@ -1,0 +1,12 @@
+# Every option. All of them are optional.
+type: custom:blood-pressure-card
+systolic_entity: sensor.monitor_systolic    # default: found automatically
+diastolic_entity: sensor.monitor_diastolic  # default: found automatically
+pulse_entity: sensor.monitor_pulse          # default: found on the same device
+guideline: esh_2023        # esh_2023, esc_2024 or acc_aha_2025 (default: esh_2023, acc_aha_2025 in the US)
+title: Blood pressure      # default: "Blood pressure", localized
+icon: mdi:heart-pulse
+history_days: 30           # 7-365
+show_history: true
+show_average: true
+show_reference: true
