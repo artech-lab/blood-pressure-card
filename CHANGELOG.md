@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-21
+
 ### Changed
 
 - Look realigned with the original inline card (v2.0.2), with every current feature kept:
@@ -59,6 +61,7 @@ First public release.
 - Warning in the browser console when two copies of the card are loaded.
 - Unit tests, browser end-to-end tests, HACS validation and release workflows.
 
-[Unreleased]: https://github.com/artech-lab/blood-pressure-card/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/artech-lab/blood-pressure-card/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/artech-lab/blood-pressure-card/releases/tag/v1.2.0
 [1.1.0]: https://github.com/artech-lab/blood-pressure-card/releases/tag/v1.1.0
 [1.0.0]: https://github.com/artech-lab/blood-pressure-card/releases/tag/v1.0.0
