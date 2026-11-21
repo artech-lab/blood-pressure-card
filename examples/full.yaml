@@ -10,3 +10,7 @@ history_days: 30           # 7-365
 show_history: true
 show_average: true
 show_reference: true
+# Optional helpers ("Create helpers" in the editor, or examples/packages/blood_pressure.yaml)
+last_entity: input_datetime.blood_pressure_last_measurement
+systolic_today_entity: sensor.blood_pressure_systolic_today
+diastolic_today_entity: sensor.blood_pressure_diastolic_today

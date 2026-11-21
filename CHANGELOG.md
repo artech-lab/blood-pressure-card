@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-21
+
+### Added
+
+- **Create helpers** button in the visual editor (administrators only): in one click it creates an
+  `input_datetime` with the time of the last measurement, an automation that sets it at every new
+  measurement, and two template sensors "Blood pressure systolic today" / "diastolic today" whose daily
+  long-term statistics hold an exact and permanent history, then links them to the card. Existing helpers
+  with the same names are reused, so pressing it again never creates duplicates. The helpers are optional:
+  without them the card works as in 1.0.0.
+- New options `last_entity`, `systolic_today_entity` and `diastolic_today_entity`, in a new editor section
+  "Helpers for history and automations".
+- The history uses the daily statistics of the "today" sensors, marked *from the daily sensors* in the
+  tooltip: after the start of the recorder history exact readings come first, on its first day the
+  helpers, before it the helpers and then the statistics of the monitor's sensors.
+- The time of the last measurement also comes from the `input_datetime` helper when it is more recent than
+  the recorder history; a change of the helper reloads the history.
+- YAML package `examples/packages/blood_pressure.yaml` with the same helpers, for those who prefer YAML.
+
 ## [1.0.0] - 2026-11-18
 
 First public release.
@@ -26,5 +45,6 @@ First public release.
 - Warning in the browser console when two copies of the card are loaded.
 - Unit tests, browser end-to-end tests, HACS validation and release workflows.
 
-[Unreleased]: https://github.com/artech-lab/blood-pressure-card/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/artech-lab/blood-pressure-card/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/artech-lab/blood-pressure-card/releases/tag/v1.1.0
 [1.0.0]: https://github.com/artech-lab/blood-pressure-card/releases/tag/v1.0.0

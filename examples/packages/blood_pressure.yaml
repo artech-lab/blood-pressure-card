@@ -1,0 +1,85 @@
+# Optional helpers for the Blood Pressure Card, as a YAML package.
+#
+# The card works WITHOUT these helpers. They give it an exact and permanent daily
+# history: the long-term statistics of the monitor's sensors carry the last value
+# over every day, while the two "today" sensors below have a value only on days
+# with readings, so their daily statistics are exact and the recorder purge does
+# not remove them. The date and time of the last measurement is also handy in
+# automations ("remind me if I did not measure today").
+#
+# Easier alternative, no YAML: edit the card and press "Create helpers" at the
+# bottom of the editor (administrators). It creates the same entities, with the
+# same English names, and links them to the card.
+#
+# How to use this package:
+#   1. In configuration.yaml enable packages (once):
+#        homeassistant:
+#          packages: !include_dir_named packages
+#   2. Copy this file to /config/packages/blood_pressure.yaml and replace
+#      sensor.my_monitor_systolic / sensor.my_monitor_diastolic (placeholders)
+#      with the systolic and diastolic sensors of your monitor, everywhere.
+#   3. Restart Home Assistant.
+#   4. A new input_datetime starts at today 00:00, which reads as "measured
+#      today": set "Blood pressure last measurement" once to the time of your
+#      last reading, or to 2000-01-01 00:00 ("never measured").
+#   5. Link the entities in the card editor (section "Helpers for history and
+#      automations"), or in YAML:
+#        last_entity: input_datetime.blood_pressure_last_measurement
+#        systolic_today_entity: sensor.blood_pressure_systolic_today
+#        diastolic_today_entity: sensor.blood_pressure_diastolic_today
+
+input_datetime:
+  blood_pressure_last_measurement:
+    name: Blood pressure last measurement
+    icon: mdi:calendar-heart
+    has_date: true
+    has_time: true
+    # no "initial": it would reset the helper at every restart
+
+automation:
+  # Records the time of every new measurement. Values restored after a restart
+  # (from unknown / unavailable) and attribute-only changes are skipped; systolic
+  # and diastolic arrive together, hence mode single and max_exceeded silent.
+  - id: blood_pressure_record_measurement
+    alias: Blood pressure record measurement
+    description: >-
+      Records the date and time of every new blood pressure measurement in
+      input_datetime.blood_pressure_last_measurement, which the daily sensors of
+      the Blood Pressure Card use.
+    mode: single
+    max_exceeded: silent
+    trigger:
+      - platform: state
+        entity_id:
+          - sensor.my_monitor_systolic
+          - sensor.my_monitor_diastolic
+        not_to:
+          - unknown
+          - unavailable
+    condition:
+      - condition: template
+        value_template: "{{ trigger.from_state is not none and trigger.from_state.state not in ['unknown','unavailable',''] and trigger.from_state.state != trigger.to_state.state }}"
+    action:
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.blood_pressure_last_measurement
+        data:
+          timestamp: "{{ now().timestamp() }}"
+
+template:
+  - sensor:
+      # The value of the monitor on the day of the last measurement, unknown on
+      # other days (now() makes it unknown at midnight). One daily statistics row
+      # per day with readings, kept for good.
+      - name: Blood pressure systolic today
+        unique_id: blood_pressure_systolic_today
+        icon: mdi:heart-pulse
+        unit_of_measurement: mmHg
+        state_class: measurement
+        state: "{% set v = states('sensor.my_monitor_systolic') %}{{ v | float if is_number(v) and states('input_datetime.blood_pressure_last_measurement')[:10] == now().strftime('%Y-%m-%d') else none }}"
+      - name: Blood pressure diastolic today
+        unique_id: blood_pressure_diastolic_today
+        icon: mdi:heart-pulse
+        unit_of_measurement: mmHg
+        state_class: measurement
+        state: "{% set v = states('sensor.my_monitor_diastolic') %}{{ v | float if is_number(v) and states('input_datetime.blood_pressure_last_measurement')[:10] == now().strftime('%Y-%m-%d') else none }}"

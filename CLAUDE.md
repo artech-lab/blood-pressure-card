@@ -42,7 +42,7 @@ Slash commands: `/publish` (first publication on GitHub, release, HACS default s
 | `tests/card.test.mjs` | Unit tests: the card runs in a `vm` sandbox, top-level functions are tested directly |
 | `tests/e2e.mjs` | Playwright tests with stub `ha-card` / `ha-icon` / `ha-form` and a mocked `hass` (`callWS`) |
 | `scripts/screenshots.cjs` | Builds the README images from a fictional monitor with simulated history and statistics |
-| `examples/` | `minimal.yaml`, `full.yaml` |
+| `examples/` | `minimal.yaml`, `full.yaml`, `packages/blood_pressure.yaml` (the helpers of the editor button, in YAML) |
 | `README.md`, `README.it.md` | English and Italian documentation: keep them aligned |
 | `hacs.json`, `.github/workflows/` | HACS metadata, validation (HACS action + tests) and release workflows |
 
@@ -51,8 +51,9 @@ Slash commands: `/publish` (first publication on GitHub, release, HACS default s
 In order: constants and defaults (`BPC_DEFAULTS`), the guidelines `BPC_GUIDELINES`, colour palettes
 `BPC_PALETTES` (one per number of categories), discovery words `BPC_WORDS`, dictionary `BPC_I18N`
 (`en`, `it`), helpers, discovery (`bpcDiscover`, `bpcResolve`), history (`bpcChanges`, `bpcReadings`,
-`bpcDaysFromReadings`, `bpcDaysFromStatistics`, `bpcMergeDays`, `bpcAverage`), editor schema, CSS, the card
-class `BloodPressureCard`, the editor `BloodPressureCardEditor` (`bpcCleanConfig`), registration.
+`bpcDaysFromReadings`, `bpcDaysFromStatistics`, `bpcDaysFromHelpers`, `bpcMergeDays`, `bpcAverage`),
+editor schema, CSS, the card class `BloodPressureCard`, one-click helpers (`bpcCreateHelpers`), the editor
+`BloodPressureCardEditor` (`bpcCleanConfig`), registration.
 
 - **Guidelines**: each one lists its categories and, per value, the lower bound of every category after the
   first. A reading takes the higher category of the two values (`bpcClassify`). A repeated bound makes a
@@ -68,7 +69,13 @@ class `BloodPressureCard`, the editor `BloodPressureCardEditor` (`bpcCleanConfig
   and `recorder/statistics_during_period` (period `day`). Raw history -> value changes (baseline and
   restored values ignored) -> readings (changes within `BPC_PAIR_MS` paired) -> exact days. Statistics only
   for the days before the raw history starts (flat days dropped). Fetched on first render, when a source
-  value changes, and every hour.
+  value or `last_entity` changes, and every hour.
+- **Helpers** (optional, `BPC_HELPERS`, fixed English names): `last_entity` (input_datetime), an unlinked
+  automation that sets it, `systolic_today_entity` / `diastolic_today_entity` (template sensors with a
+  value only on measurement days). Their daily statistics come in the same statistics call
+  (`bpcDaysFromHelpers`, no flat-day filter); `bpcMergeDays` gives the precedence. `bpcCreateHelpers`
+  reuses linked or same-name entities, never duplicates; keep `examples/packages/blood_pressure.yaml`
+  aligned (a unit test checks it).
 - **Updates**: `set hass` runs at every state change; the DOM is built once per layout (`_layout`) and
   updated in place only when a signature of the shown values changes (`_sig`). Clicks and keys are
   delegated from `ha-card`.

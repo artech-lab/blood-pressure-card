@@ -9,7 +9,8 @@
  * Works out of the box: the card finds the systolic, diastolic and pulse
  * sensors of the monitor by itself (Withings, Omron, Health Connect, ESPHome,
  * any integration). The history comes from the recorder: exact readings while
- * they are kept, long-term statistics for older days.
+ * they are kept, long-term statistics for older days. Optional helpers, created
+ * from the visual editor, keep an exact and permanent daily history.
  *
  * Copyright (C) 2026 The blood-pressure-card contributors
  *
@@ -26,7 +27,7 @@
  * The source is plain ASCII: non-ASCII characters are written as \u escapes.
  */
 
-const BPC_VERSION = "1.0.0";
+const BPC_VERSION = "1.1.0";
 const BPC_TAG = "blood-pressure-card";
 const BPC_EDITOR_TAG = BPC_TAG + "-editor";
 const BPC_REPO_URL = "https://github.com/artech-lab/blood-pressure-card";
@@ -39,6 +40,25 @@ const BPC_PAIR_MS = 120000;
 /* A daily statistic is a day with readings only if its value moved by more
    than this: a flat day is the previous reading carried over. */
 const BPC_FLAT = 0.001;
+
+/* Optional helpers, created by the "Create helpers" button of the editor. Names are
+   fixed English strings in every language, so entity ids are predictable and match
+   examples/packages/blood_pressure.yaml. The "today" sensors have a value only on
+   days with readings: their daily long-term statistics are exact and permanent. */
+const BPC_HELPERS = {
+  last: { key: "last_entity", name: "Blood pressure last measurement", domain: "input_datetime",
+    icon: "mdi:calendar-heart", data: { has_date: true, has_time: true } },
+  automation: { name: "Blood pressure record measurement" },
+  today: [
+    { key: "systolic_today_entity", name: "Blood pressure systolic today", source: "systolic_entity" },
+    { key: "diastolic_today_entity", name: "Blood pressure diastolic today", source: "diastolic_entity" }
+  ]
+};
+const BPC_HELPER_KEYS = ["last_entity", "systolic_today_entity", "diastolic_today_entity"];
+/* A new input_datetime starts at today 00:00, which would read as "measured today":
+   this value means "never measured". Earlier times of the helper are ignored. */
+const BPC_NEVER = "2000-01-01 00:00:00";
+const BPC_NEVER_MS = Date.UTC(2001, 0, 1);
 
 const BPC_DEFAULTS = {
   history_days: 30,
@@ -117,6 +137,7 @@ const BPC_I18N = {
     readings: "{n} readings",
     reading: "1 reading",
     from_statistics: "estimated from statistics",
+    from_helpers: "from the daily sensors",
     min: "min",
     mean: "avg",
     max: "max",
@@ -146,7 +167,20 @@ const BPC_I18N = {
     ed_history_days: "History days",
     ed_show_history: "Show history",
     ed_show_average: "Show 7-day average",
-    ed_show_reference: "Show guideline reference"
+    ed_show_reference: "Show guideline reference",
+    ed_helpers: "Helpers for history and automations",
+    ed_last_entity: "Date and time of the last measurement (input_datetime)",
+    ed_systolic_today_entity: "Systolic today (sensor with daily statistics)",
+    ed_diastolic_today_entity: "Diastolic today (sensor with daily statistics)",
+    ed_hp_title: "Helpers for history and automations",
+    ed_hp_desc: "Optional. Creates in one click a date and time helper, an automation that sets it at every new measurement and two \"today\" sensors, and links them to the card. The sensors have a value only on days with readings, so their long-term statistics keep an exact and permanent daily history; the date and time is also available to automations.",
+    ed_hp_button: "Create helpers",
+    ed_hp_busy: "Creating helpers...",
+    ed_hp_done: "Done: {created} created, {reused} already present. Save the card to keep the links.",
+    ed_hp_fail: "Could not create every helper: {error}",
+    ed_hp_admin: "Only an administrator can create helpers.",
+    ed_hp_linked: "{n} of {total} helpers linked",
+    ed_hp_no_sensors: "Pick the systolic and diastolic sensors first: the helpers are built on them."
   },
   it: {
     card_name: "Blood Pressure Card",
@@ -169,6 +203,7 @@ const BPC_I18N = {
     readings: "{n} misurazioni",
     reading: "1 misurazione",
     from_statistics: "stimato dalle statistiche",
+    from_helpers: "dai sensori giornalieri",
     min: "min",
     mean: "media",
     max: "max",
@@ -198,7 +233,20 @@ const BPC_I18N = {
     ed_history_days: "Giorni di storico",
     ed_show_history: "Mostra storico",
     ed_show_average: "Mostra media 7 giorni",
-    ed_show_reference: "Mostra riferimento della linea guida"
+    ed_show_reference: "Mostra riferimento della linea guida",
+    ed_helpers: "Helper per storico e automazioni",
+    ed_last_entity: "Data e ora dell'ultima misurazione (input_datetime)",
+    ed_systolic_today_entity: "Sistolica di oggi (sensore con statistiche giornaliere)",
+    ed_diastolic_today_entity: "Diastolica di oggi (sensore con statistiche giornaliere)",
+    ed_hp_title: "Helper per storico e automazioni",
+    ed_hp_desc: "Facoltativi. Crea con un clic un helper data e ora, un'automazione che lo aggiorna a ogni nuova misurazione e due sensori \"di oggi\", e li collega alla card. I sensori hanno un valore solo nei giorni con misurazioni, quindi le loro statistiche a lungo termine conservano uno storico giornaliero esatto e permanente; data e ora sono disponibili anche alle automazioni.",
+    ed_hp_button: "Crea helper",
+    ed_hp_busy: "Creazione degli helper...",
+    ed_hp_done: "Fatto: {created} creati, {reused} gi\u00e0 presenti. Salva la card per mantenere i collegamenti.",
+    ed_hp_fail: "Non \u00e8 stato possibile creare tutti gli helper: {error}",
+    ed_hp_admin: "Solo un amministratore pu\u00f2 creare gli helper.",
+    ed_hp_linked: "{n} di {total} helper collegati",
+    ed_hp_no_sensors: "Scegli prima i sensori di pressione sistolica e diastolica: gli helper si basano su di essi."
   }
 };
 
@@ -458,15 +506,53 @@ function bpcDaysFromStatistics(sysRows, diaRows) {
   return out;
 }
 
-/* Exact days from the recorder history from rawFrom on, statistics before. */
-function bpcMergeDays(readingDays, statisticDays, rawFrom) {
-  const from = rawFrom ? bpcDayKey(rawFrom) : null;
+/* Days with readings from the daily statistics of the "today" helper sensors: they
+   have a value only on days with readings, so every row with a value is a real day.
+   No flat-day filter: a day with a single reading is flat but real. */
+function bpcDaysFromHelpers(sysRows, diaRows) {
+  const axis = (rows) => {
+    const out = {};
+    for (const r of rows || []) {
+      if (r.min == null || r.max == null || r.mean == null) continue;
+      const t = typeof r.start === "number" ? (r.start < 1e11 ? r.start * 1000 : r.start) : Date.parse(r.start);
+      if (isFinite(t)) out[bpcDayKey(t)] = { min: r.min, max: r.max, mean: r.mean };
+    }
+    return out;
+  };
+  const s = axis(sysRows), d = axis(diaRows);
   const out = {};
-  for (const key of Object.keys(statisticDays)) {
-    if (!from || key < from || (key === from && !readingDays[key])) out[key] = statisticDays[key];
+  for (const key of Object.keys(Object.assign({}, s, d))) {
+    out[key] = { date: key, source: "helpers", count: null, systolic: s[key] || null, diastolic: d[key] || null };
   }
-  for (const key of Object.keys(readingDays)) out[key] = readingDays[key];
+  return out;
+}
+
+/* One entry per day, best source first. After the first day of the recorder
+   history (rawFrom): exact readings, then helpers. On that day, whose history can
+   be partial: helpers, readings, statistics. Before it: helpers and, only for the
+   days before the first helper day, the statistics of the source sensors. */
+function bpcMergeDays(readingDays, helperDays, statisticDays, rawFrom) {
+  readingDays = readingDays || {};
+  helperDays = helperDays || {};
+  statisticDays = statisticDays || {};
+  const from = rawFrom ? bpcDayKey(rawFrom) : null;
+  const firstHelper = Object.keys(helperDays).sort()[0] || null;
+  const out = {};
+  for (const key of Object.keys(Object.assign({}, readingDays, helperDays, statisticDays))) {
+    let day;
+    if (from && key > from) day = readingDays[key] || helperDays[key];
+    else if (from && key === from) day = helperDays[key] || readingDays[key] || statisticDays[key];
+    else day = helperDays[key] || readingDays[key] || (!firstHelper || key < firstHelper ? statisticDays[key] : null);
+    if (day) out[key] = day;
+  }
   return Object.keys(out).sort().map((k) => out[k]);
+}
+
+/* Time (ms) of the last measurement recorded in the input_datetime helper, or null. */
+function bpcHelperTime(hass, id) {
+  const st = id && hass && hass.states ? hass.states[id] : null;
+  const ts = st && st.attributes ? Number(st.attributes.timestamp) : NaN;
+  return isFinite(ts) && ts * 1000 >= BPC_NEVER_MS ? ts * 1000 : null;
 }
 
 /* Mean of the daily means of the last 7 local days (today included). */
@@ -508,6 +594,14 @@ function bpcEditorSchema(lang) {
         { name: "show_history", selector: { boolean: {} } },
         { name: "show_average", selector: { boolean: {} } },
         { name: "show_reference", selector: { boolean: {} } }
+      ]
+    },
+    {
+      type: "expandable", name: "helpers", flatten: true, title: bpcT(lang, "ed_helpers"), icon: "mdi:link-variant",
+      schema: [
+        { name: "last_entity", selector: { entity: { domain: "input_datetime" } } },
+        { name: "systolic_today_entity", selector: sensor },
+        { name: "diastolic_today_entity", selector: sensor }
       ]
     }
   ];
@@ -740,7 +834,9 @@ class BloodPressureCard extends HTMLElement {
     const sys = bpcNum(h, c.systolic_entity), dia = bpcNum(h, c.diastolic_entity);
     const pulse = bpcNum(h, c.pulse_entity);
     this._maybeFetch(false);
-    const last = this._hist && this._hist.last;
+    let last = this._hist && this._hist.last;
+    const helperTime = bpcHelperTime(h, c.last_entity);
+    if (helperTime !== null && (!last || helperTime > last.t)) last = { t: helperTime, exact: true };
     const when = last ? (last.exact ? bpcT(lang, "measured", { when: bpcRelative(h, last.t) })
       : bpcT(lang, "measured_on", { date: new Date(last.t).toLocaleDateString(bpcLocale(h), { day: "numeric", month: "short" }) })) : "";
     const avg = this._hist && this._hist.average;
@@ -775,13 +871,22 @@ class BloodPressureCard extends HTMLElement {
     $("hist").hidden = c.show_history === false;
   }
 
-  /* History: on first render, when a value changes, and every hour. */
+  /* The "today" helper sensors that are linked and exist. */
+  _todayIds(c) {
+    const h = this._hass;
+    const ok = (id) => (id && h.states[id] ? id : null);
+    return { sys: ok(c.systolic_today_entity), dia: ok(c.diastolic_today_entity) };
+  }
+
+  /* History: on first render, when a value or the last measurement changes, and every hour. */
   _maybeFetch(force) {
     const c = this._c, h = this._hass;
     if (!h || !c || !this._built || this._loading) return;
     if (c.show_history === false && c.show_average === false) return;
     const st = (id) => (id && h.states[id] ? h.states[id].state : "");
-    const sig = [c.systolic_entity, c.diastolic_entity, c.history_days, st(c.systolic_entity), st(c.diastolic_entity)].join("|");
+    const today = this._todayIds(c);
+    const sig = [c.systolic_entity, c.diastolic_entity, c.history_days, st(c.systolic_entity), st(c.diastolic_entity),
+      c.last_entity, st(c.last_entity), today.sys, today.dia].join("|");
     if (!force && sig === this._histSig) return;
     this._histSig = sig;
     this._fetch(c);
@@ -791,6 +896,8 @@ class BloodPressureCard extends HTMLElement {
     const h = this._hass;
     this._loading = true;
     const ids = [c.systolic_entity, c.diastolic_entity];
+    const today = this._todayIds(c);
+    const statIds = ids.concat([today.sys, today.dia].filter((id) => id && ids.indexOf(id) < 0));
     const end = new Date();
     end.setHours(24, 0, 0, 0);
     const start = new Date(end);
@@ -804,7 +911,7 @@ class BloodPressureCard extends HTMLElement {
           no_attributes: true, significant_changes_only: false
         }, range)).catch(() => ({})),
         h.callWS(Object.assign({
-          type: "recorder/statistics_during_period", statistic_ids: ids, period: "day",
+          type: "recorder/statistics_during_period", statistic_ids: statIds, period: "day",
           types: ["min", "max", "mean"]
         }, range)).catch(() => ({}))
       ]);
@@ -815,8 +922,10 @@ class BloodPressureCard extends HTMLElement {
       }).filter((t) => isFinite(t));
       const rawFrom = firsts.length ? Math.max.apply(null, firsts) : null;
       const readings = bpcReadings(sysRaw, diaRaw);
+      const stat = (id) => (id && stats ? stats[id] : null);
       const days = bpcMergeDays(bpcDaysFromReadings(readings),
-        bpcDaysFromStatistics(stats && stats[ids[0]], stats && stats[ids[1]]), rawFrom)
+        bpcDaysFromHelpers(stat(today.sys), stat(today.dia)),
+        bpcDaysFromStatistics(stat(ids[0]), stat(ids[1])), rawFrom)
         .filter((d) => d.date >= bpcDayKey(start.getTime()));
       let last = null;
       if (readings.length) last = { t: readings[readings.length - 1].t, exact: true };
@@ -923,7 +1032,7 @@ class BloodPressureCard extends HTMLElement {
       const x = best.x, zi = this._dayLevel(x, g);
       const row = (name, b) => !b ? "" :
         `<div class="tiprow">${name} ${bpcEsc(bpcT(lang, "min"))} <span class="tipv">${Math.round(b.min)}</span> ${BPC_DOT} ${bpcEsc(bpcT(lang, "mean"))} <span class="tipv">${Math.round(b.mean)}</span> ${BPC_DOT} ${bpcEsc(bpcT(lang, "max"))} <span class="tipv">${Math.round(b.max)}</span></div>`;
-      const note = x.source === "statistics" ? bpcT(lang, "from_statistics") : x.count === 1 ? bpcT(lang, "reading") : bpcT(lang, "readings", { n: x.count });
+      const note = x.source === "statistics" ? bpcT(lang, "from_statistics") : x.source === "helpers" ? bpcT(lang, "from_helpers") : x.count === 1 ? bpcT(lang, "reading") : bpcT(lang, "readings", { n: x.count });
       const day = new Date(best.ms).toLocaleDateString(bpcLocale(h), { weekday: "short", day: "numeric", month: "numeric" });
       tip.innerHTML = `<div class="tiph">${bpcEsc(day)} <span style="color:${bpcColor(zi, g.categories.length)}">${bpcEsc(bpcT(lang, "c_" + g.categories[zi]))}</span></div>` +
         row("SYS", x.systolic) + row("DIA", x.diastolic) + `<div class="tipn">${bpcEsc(note)}</div>`;
@@ -936,6 +1045,159 @@ class BloodPressureCard extends HTMLElement {
     svg.addEventListener("touchstart", move, { passive: true });
     svg.addEventListener("touchend", hide);
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* One-click helpers (visual editor, administrators only)              */
+/* ------------------------------------------------------------------ */
+
+/* Object id that Home Assistant derives from an (ASCII) helper name. */
+function bpcSlug(s) {
+  return String(s).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function bpcErrText(err) {
+  if (!err) return "unknown error";
+  if (typeof err === "string") return err;
+  if (err.body && err.body.message) return String(err.body.message);
+  if (err.message) return String(err.message);
+  if (err.error) return String(err.error);
+  if (typeof err.body === "string" && err.body) return err.body;
+  try { return JSON.stringify(err); } catch (e) { return String(err); }
+}
+
+function bpcDelay(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/* State template of a "today" sensor: the value of the source sensor on the day
+   of the last measurement, none on other days (now() makes it unknown at midnight). */
+function bpcTodayTemplate(source, last) {
+  return "{% set v = states('" + source + "') %}{{ v | float if is_number(v) and states('" + last +
+    "')[:10] == now().strftime('%Y-%m-%d') else none }}";
+}
+
+/* Automation that sets the input_datetime at every new measurement. Values restored
+   after a restart (from unknown / unavailable) and attribute-only changes are skipped;
+   systolic and diastolic arrive together, hence mode single and max_exceeded silent.
+   The keys work on every supported Home Assistant version. */
+function bpcAutomationConfig(systolic, diastolic, last) {
+  return {
+    alias: BPC_HELPERS.automation.name,
+    description: "Created by the Blood Pressure Card. Records the date and time of every new blood pressure " +
+      "measurement in " + last + ", which the daily sensors of the card use. Delete it together with the helpers " +
+      "if you stop using them.",
+    mode: "single",
+    max_exceeded: "silent",
+    trigger: [{ platform: "state", entity_id: [systolic, diastolic], not_to: ["unknown", "unavailable"] }],
+    condition: [{
+      condition: "template",
+      value_template: "{{ trigger.from_state is not none and trigger.from_state.state not in ['unknown','unavailable',''] " +
+        "and trigger.from_state.state != trigger.to_state.state }}"
+    }],
+    action: [{
+      action: "input_datetime.set_datetime",
+      target: { entity_id: last },
+      data: { timestamp: "{{ now().timestamp() }}" }
+    }]
+  };
+}
+
+/* Initial value of a new input_datetime: the time of the last reading in the
+   recorder history of the last 30 days, or BPC_NEVER. */
+async function bpcInitialMeasurement(hass, sys, dia) {
+  try {
+    const now = Date.now();
+    const raw = await hass.callWS({
+      type: "history/history_during_period", entity_ids: [sys, dia], minimal_response: true,
+      no_attributes: true, significant_changes_only: false,
+      start_time: new Date(now - 30 * BPC_DAY).toISOString(), end_time: new Date(now).toISOString()
+    });
+    const readings = bpcReadings((raw && raw[sys]) || [], (raw && raw[dia]) || []);
+    if (readings.length) return { timestamp: Math.round(readings[readings.length - 1].t / 1000) };
+  } catch (e) {
+    /* no history: never measured */
+  }
+  return { datetime: BPC_NEVER };
+}
+
+/* Creates the missing helpers, reuses the existing ones and returns the updated card
+   config. The input_datetime uses the storage-collection WebSocket command, the
+   automation the automation config API and the sensors the config flow of the
+   Template integration, like the Helpers page of Home Assistant. */
+async function bpcCreateHelpers(hass, config, waitMs) {
+  const cfg = Object.assign({}, config);
+  const out = { config: cfg, created: 0, reused: 0, error: null, noSensors: false };
+  const wait = waitMs === undefined ? 300 : waitMs;
+  const states = (hass && hass.states) || {};
+  const exists = (id) => !!(id && states[id]);
+  const byName = (domain, name) => (exists(domain + "." + bpcSlug(name)) ? domain + "." + bpcSlug(name) : null);
+  const resolve = async (match) => {
+    for (let i = 0; i < 3; i++) {
+      await bpcDelay(i === 0 ? wait : wait * 3);
+      const reg = await hass.callWS({ type: "config/entity_registry/list" });
+      const e = (reg || []).find(match);
+      if (e) return e.entity_id;
+    }
+    return null;
+  };
+  const src = bpcResolve(config, hass);
+  if (!src.systolic_entity || !src.diastolic_entity) {
+    out.noSensors = true;
+    return out;
+  }
+  try {
+    /* 1. date and time of the last measurement */
+    const spec = BPC_HELPERS.last;
+    if (exists(cfg[spec.key])) out.reused += 1;
+    else if (byName(spec.domain, spec.name)) {
+      cfg[spec.key] = byName(spec.domain, spec.name);
+      out.reused += 1;
+    } else {
+      const item = await hass.callWS(Object.assign({ type: spec.domain + "/create", name: spec.name, icon: spec.icon }, spec.data));
+      out.created += 1;
+      const id = (await resolve((e) => e.platform === spec.domain && e.unique_id === item.id)) || spec.domain + "." + item.id;
+      cfg[spec.key] = id;
+      const value = await bpcInitialMeasurement(hass, src.systolic_entity, src.diastolic_entity);
+      await hass.callService("input_datetime", "set_datetime", Object.assign({ entity_id: id }, value));
+    }
+    const last = cfg[spec.key];
+
+    /* 2. automation that records every measurement (not linked in the config) */
+    const alias = BPC_HELPERS.automation.name;
+    const automation = byName("automation", alias) || Object.keys(states).find((id) =>
+      id.indexOf("automation.") === 0 && states[id].attributes && states[id].attributes.friendly_name === alias);
+    if (automation) out.reused += 1;
+    else {
+      if (!hass.callApi) throw new Error("callApi not available");
+      await hass.callApi("POST", "config/automation/config/" + Date.now(),
+        bpcAutomationConfig(src.systolic_entity, src.diastolic_entity, last));
+      out.created += 1;
+    }
+
+    /* 3. "today" sensors with daily statistics */
+    for (const t of BPC_HELPERS.today) {
+      if (exists(cfg[t.key])) { out.reused += 1; continue; }
+      const found = byName("sensor", t.name);
+      if (found) { cfg[t.key] = found; out.reused += 1; continue; }
+      if (!hass.callApi) throw new Error("callApi not available");
+      let step = await hass.callApi("POST", "config/config_entries/flow", { handler: "template", show_advanced_options: false });
+      if (step.type === "menu") step = await hass.callApi("POST", "config/config_entries/flow/" + step.flow_id, { next_step_id: "sensor" });
+      if (step.type !== "form") throw new Error("template: unexpected step " + step.type);
+      const res = await hass.callApi("POST", "config/config_entries/flow/" + step.flow_id, {
+        name: t.name, state: bpcTodayTemplate(src[t.source], last),
+        unit_of_measurement: "mmHg", state_class: "measurement"
+      });
+      if (res.type !== "create_entry") throw new Error("template: " + (res.errors ? JSON.stringify(res.errors) : res.type));
+      out.created += 1;
+      const entryId = res.result && typeof res.result === "object" ? res.result.entry_id : res.result;
+      cfg[t.key] = (entryId && (await resolve((e) => e.config_entry_id === entryId && e.entity_id.indexOf("sensor.") === 0))) ||
+        "sensor." + bpcSlug(t.name);
+    }
+  } catch (err) {
+    out.error = bpcErrText(err);
+  }
+  return out;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1010,8 +1272,78 @@ class BloodPressureCardEditor extends HTMLElement {
       history_days: shown.history_days,
       show_history: shown.show_history !== false,
       show_average: shown.show_average !== false,
-      show_reference: shown.show_reference !== false
+      show_reference: shown.show_reference !== false,
+      last_entity: this._config.last_entity || undefined,
+      systolic_today_entity: this._config.systolic_today_entity || undefined,
+      diastolic_today_entity: this._config.diastolic_today_entity || undefined
     };
+    this._renderHelpersPanel();
+  }
+
+  /* Panel with the one-click "Create helpers" button, below the form. */
+  _renderHelpersPanel() {
+    if (!this._form) return;
+    if (!this._hp) {
+      const box = document.createElement("div");
+      box.className = "bpc-hp";
+      box.innerHTML = "<style>" +
+        ".bpc-hp{margin-top:16px;padding:12px 14px;border:1px solid var(--divider-color);border-radius:12px}" +
+        ".bpc-hp-t{font-weight:500;margin-bottom:4px;color:var(--primary-text-color)}" +
+        ".bpc-hp-d{font-size:13px;line-height:1.45;color:var(--secondary-text-color);margin-bottom:10px}" +
+        ".bpc-hp-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}" +
+        ".bpc-hp button{border:none;border-radius:18px;padding:8px 16px;font:inherit;font-weight:500;cursor:pointer;" +
+        "color:var(--text-primary-color,#fff);background:var(--primary-color)}" +
+        ".bpc-hp button[hidden]{display:none}" +
+        ".bpc-hp button[disabled]{opacity:.55;cursor:default}" +
+        ".bpc-hp-s{font-size:13px;color:var(--secondary-text-color)}" +
+        ".bpc-hp-s.err{color:var(--error-color,#db4437)}" +
+        "</style>" +
+        '<div class="bpc-hp-t"></div><div class="bpc-hp-d"></div>' +
+        '<div class="bpc-hp-row"><button type="button"></button><span class="bpc-hp-s"></span></div>';
+      box.querySelector("button").addEventListener("click", () => this._createHelpers());
+      this._hp = box;
+      this.appendChild(box);
+    }
+    const h = this._hass, c = this._config || {};
+    const lang = bpcLang(h);
+    const admin = !!(h && h.user && h.user.is_admin);
+    this._hp.querySelector(".bpc-hp-t").textContent = bpcT(lang, "ed_hp_title");
+    this._hp.querySelector(".bpc-hp-d").textContent = bpcT(lang, "ed_hp_desc");
+    const btn = this._hp.querySelector("button"), st = this._hp.querySelector(".bpc-hp-s");
+    btn.textContent = bpcT(lang, this._hpBusy ? "ed_hp_busy" : "ed_hp_button");
+    btn.hidden = !admin;
+    btn.disabled = !!this._hpBusy;
+    if (this._hpMsg) {
+      st.textContent = this._hpMsg.text;
+      st.className = "bpc-hp-s" + (this._hpMsg.err ? " err" : "");
+    } else {
+      let n = 0;
+      for (const k of BPC_HELPER_KEYS) if (c[k] && h && h.states && h.states[c[k]]) n += 1;
+      st.textContent = admin ? bpcT(lang, "ed_hp_linked", { n, total: BPC_HELPER_KEYS.length }) : bpcT(lang, "ed_hp_admin");
+      st.className = "bpc-hp-s";
+    }
+  }
+
+  async _createHelpers() {
+    if (this._hpBusy || !this._hass || !this._config) return;
+    const lang = bpcLang(this._hass);
+    this._hpBusy = true;
+    this._hpMsg = null;
+    this._renderHelpersPanel();
+    const r = await bpcCreateHelpers(this._hass, this._config, this._hpWait);
+    this._hpBusy = false;
+    if (r.noSensors) {
+      this._hpMsg = { text: bpcT(lang, "ed_hp_no_sensors"), err: true };
+    } else {
+      this._config = bpcCleanConfig(r.config);
+      this.dispatchEvent(new CustomEvent("config-changed", {
+        detail: { config: JSON.parse(JSON.stringify(this._config)) }, bubbles: true, composed: true
+      }));
+      this._hpMsg = r.error
+        ? { text: bpcT(lang, "ed_hp_fail", { error: r.error }), err: true }
+        : { text: bpcT(lang, "ed_hp_done", { created: r.created, reused: r.reused }), err: false };
+    }
+    this._update();
   }
 }
 

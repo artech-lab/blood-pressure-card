@@ -28,6 +28,8 @@ any other integration): no helpers, no YAML, no restarts.
 - **Exact readings**: while the recorder keeps them (10 days by default) the history is built from the
   actual measurements; older days come from the long-term statistics. Values restored after a restart are
   not counted as measurements.
+- **Optional helpers in one click**: for an exact and permanent daily history, and the time of the last
+  measurement in automations. See [Optional: helpers for history and automations](#optional-helpers-for-history-and-automations).
 - **Pulse**, **7-day average** and **time of the last measurement**.
 - **English and Italian**, following the language and date format of your Home Assistant profile.
 - **Native look**: theme colours, light and dark mode, sections layout, keyboard accessible, a visual editor
@@ -87,6 +89,9 @@ Every option is optional and available in the visual editor.
 | `show_history` | `true` | Daily history chart. |
 | `show_average` | `true` | 7-day average: mean of the daily means of the last 7 days. |
 | `show_reference` | `true` | Upper limit of the lowest category of the guideline. |
+| `last_entity` | – | `input_datetime` with the date and time of the last measurement ([helpers](#optional-helpers-for-history-and-automations)). |
+| `systolic_today_entity` | – | Sensor with today's systolic value, whose daily statistics feed the history ([helpers](#optional-helpers-for-history-and-automations)). |
+| `diastolic_today_entity` | – | Sensor with today's diastolic value, whose daily statistics feed the history ([helpers](#optional-helpers-for-history-and-automations)). |
 
 See [`examples/`](examples) for a full configuration. The options `sys_entity` and `dia_entity` of earlier
 inline versions of the card still work; the visual editor renames them when saving.
@@ -137,6 +142,51 @@ Values in mmHg. A reading takes the higher category reached by either value.
   and shows only the days in which the value moved (a flat day is the previous reading carried over). These
   days are slightly faded and marked *estimated from statistics*: their range can include the previous
   reading, and the mean is weighted by time.
+- **With the helpers** (optional), the daily statistics of the two "today" sensors come first: days marked
+  *from the daily sensors*, not faded. In order of precedence, for each day:
+  - after the first day of the recorder history: the exact readings, then the helpers;
+  - on that first day, whose history can be partial: the helpers, then the readings, then the statistics;
+  - before it: the helpers and, only for the days before the first helper day, the statistics of the
+    monitor's sensors.
+- **Last measurement**: the time of the last reading in the recorder history, or the time stored in the
+  `input_datetime` helper when it is more recent.
+
+## Optional: helpers for history and automations
+
+The card works without helpers, as in version 1.0. They solve one limit of the long-term statistics: the
+sensors of a monitor keep their last value until the next reading, so their daily statistics carry it over
+every day. Days without readings are flat, a day with a reading also includes the previous value, and the
+mean is weighted by time.
+
+Edit the card and press **Create helpers** at the bottom of the editor (administrators only). In one click
+the card:
+
+- creates an `input_datetime` *Blood pressure last measurement* (`input_datetime.blood_pressure_last_measurement`)
+  and sets it to the time of the last reading found in the recorder history of the last 30 days, or to
+  2000-01-01 00:00 ("never measured");
+- creates an automation *Blood pressure record measurement* that sets it at every new measurement, skipping
+  values restored after a restart and attribute-only changes;
+- creates two template sensors, *Blood pressure systolic today* and *Blood pressure diastolic today*
+  (`sensor.blood_pressure_systolic_today`, `sensor.blood_pressure_diastolic_today`, mmHg,
+  `state_class: measurement`). They have the value of the monitor only on the day of the last measurement
+  and are unknown on other days, so their daily long-term statistics are exact: one row per day with
+  readings, with the real minimum and maximum. The recorder purge does not remove them;
+- links the `input_datetime` and the two sensors to the card. Then save the card.
+
+The names are fixed English strings in every language, so entity ids are predictable. Helpers and an
+automation that are already linked, or that already exist with the same names, are reused: pressing the
+button again never creates duplicates, and after an error it continues where it stopped. The sensors are
+built on the systolic and diastolic sensors chosen in the card (or found automatically); if you change
+monitor, delete the helpers and create them again.
+
+The daily statistics build up from the day of the creation on: older days still come from the statistics of
+the monitor's sensors. The `input_datetime` is also handy in automations, for example to remind you if you
+have not measured today.
+
+To remove them: delete the two sensors and the `input_datetime` in *Settings → Devices & services →
+Helpers*, the automation in *Settings → Automations & scenes*, and clear the three options in the editor.
+If you prefer YAML, the package [`examples/packages/blood_pressure.yaml`](examples/packages/blood_pressure.yaml)
+creates the same entities (replace the placeholder sensors with yours).
 
 ## Languages
 
@@ -153,13 +203,16 @@ any other language falls back to English. Contributions of new languages are wel
   change the sensors and cannot be seen.
 - **No history before the last days** — the sensors need a `state_class` for Home Assistant to keep
   long-term statistics; without it only the recorder history is available.
+- **No "Create helpers" button** — only administrators can create helpers; ask one to press it once.
+- **"Could not create every helper"** — the helpers created before the error stay linked. Fix the cause shown
+  in the message, then press the button again: it continues where it stopped.
 - **Two copies loaded** — the browser console warns when the card is loaded twice (for example a manual
   resource and HACS): keep only `/hacsfiles/blood-pressure-card/blood-pressure-card.js`.
 
 ## Development
 
 ```bash
-npm test             # unit tests of discovery, classification, history and translations (Node 20+)
+npm test             # unit tests of discovery, classification, history, helpers and translations (Node 20+)
 npm install && npx playwright install chromium   # once, for the two commands below
 npm run test:e2e     # browser tests with a simulated Home Assistant
 npm run screenshots  # regenerates the images in images/ with demo data

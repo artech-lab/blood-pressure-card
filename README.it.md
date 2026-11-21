@@ -29,6 +29,8 @@ Connect, ESPHome o qualsiasi altra integrazione): niente helper, niente YAML, ne
 - **Misurazioni esatte**: finché il recorder le conserva (10 giorni di default) lo storico è costruito dalle
   misurazioni reali; i giorni più vecchi arrivano dalle statistiche a lungo termine. I valori ripristinati
   dopo un riavvio non contano come misurazioni.
+- **Helper facoltativi con un clic**: per uno storico giornaliero esatto e permanente e per avere l'ora
+  dell'ultima misurazione nelle automazioni. Vedi [Facoltativo: helper per storico e automazioni](#facoltativo-helper-per-storico-e-automazioni).
 - **Battito**, **media di 7 giorni** e **ora dell'ultima misurazione**.
 - **Italiano e inglese**, secondo la lingua e il formato delle date del profilo di Home Assistant.
 - **Aspetto nativo**: colori del tema, modalità chiara e scura, layout a sezioni, accessibile da tastiera,
@@ -88,6 +90,9 @@ Tutte le opzioni sono facoltative e disponibili nell'editor visuale.
 | `show_history` | `true` | Grafico dello storico giornaliero. |
 | `show_average` | `true` | Media 7 giorni: media delle medie giornaliere degli ultimi 7 giorni. |
 | `show_reference` | `true` | Limite superiore della categoria più bassa della linea guida. |
+| `last_entity` | – | `input_datetime` con data e ora dell'ultima misurazione ([helper](#facoltativo-helper-per-storico-e-automazioni)). |
+| `systolic_today_entity` | – | Sensore con la sistolica di oggi, le cui statistiche giornaliere alimentano lo storico ([helper](#facoltativo-helper-per-storico-e-automazioni)). |
+| `diastolic_today_entity` | – | Sensore con la diastolica di oggi, le cui statistiche giornaliere alimentano lo storico ([helper](#facoltativo-helper-per-storico-e-automazioni)). |
 
 Vedi [`examples/`](examples) per una configurazione completa. Le opzioni `sys_entity` e `dia_entity` delle
 versioni inline precedenti funzionano ancora; l'editor visuale le rinomina al salvataggio.
@@ -139,6 +144,52 @@ Valori in mmHg. Una misurazione assume la categoria più alta raggiunta da uno d
   giornaliere a lungo termine e mostra solo i giorni in cui il valore si è mosso (un giorno piatto è la
   misurazione precedente che prosegue). Questi giorni sono leggermente sbiaditi e indicati come *stimato
   dalle statistiche*: l'intervallo può includere la misurazione precedente e la media è pesata sul tempo.
+- **Con gli helper** (facoltativi) vengono prima le statistiche giornaliere dei due sensori "di oggi":
+  giorni indicati come *dai sensori giornalieri*, non sbiaditi. In ordine di precedenza, per ogni giorno:
+  - dopo il primo giorno della cronologia del recorder: le misurazioni esatte, poi gli helper;
+  - in quel primo giorno, la cui cronologia può essere parziale: gli helper, poi le misurazioni, poi le
+    statistiche;
+  - prima: gli helper e, solo per i giorni precedenti al primo giorno degli helper, le statistiche dei
+    sensori del misuratore.
+- **Ultima misurazione**: l'ora dell'ultima misurazione nella cronologia del recorder, oppure l'ora salvata
+  nell'helper `input_datetime` quando è più recente.
+
+## Facoltativo: helper per storico e automazioni
+
+La card funziona senza helper, come nella versione 1.0. Gli helper risolvono un limite delle statistiche a
+lungo termine: i sensori di un misuratore mantengono l'ultimo valore fino alla misurazione successiva, quindi
+le loro statistiche giornaliere lo trascinano su ogni giorno. I giorni senza misurazioni risultano piatti,
+quelli con una misurazione includono anche il valore precedente e la media è pesata sul tempo.
+
+Modifica la card e premi **Crea helper** in fondo all'editor (solo amministratori). Con un clic la card:
+
+- crea un `input_datetime` *Blood pressure last measurement* (`input_datetime.blood_pressure_last_measurement`)
+  e lo imposta all'ora dell'ultima misurazione trovata nella cronologia del recorder degli ultimi 30 giorni,
+  oppure al 2000-01-01 00:00 ("mai misurata");
+- crea un'automazione *Blood pressure record measurement* che lo aggiorna a ogni nuova misurazione,
+  scartando i valori ripristinati dopo un riavvio e i cambi dei soli attributi;
+- crea due sensori template, *Blood pressure systolic today* e *Blood pressure diastolic today*
+  (`sensor.blood_pressure_systolic_today`, `sensor.blood_pressure_diastolic_today`, mmHg,
+  `state_class: measurement`). Hanno il valore del misuratore solo nel giorno dell'ultima misurazione e sono
+  sconosciuti negli altri giorni, quindi le loro statistiche giornaliere a lungo termine sono esatte: una
+  riga per ogni giorno con misurazioni, con il minimo e il massimo reali. Il purge del recorder non le
+  cancella;
+- collega l'`input_datetime` e i due sensori alla card. Poi salva la card.
+
+I nomi sono fissi in inglese in ogni lingua, così gli entity id sono prevedibili. Helper e automazione già
+collegati, o già esistenti con lo stesso nome, vengono riusati: premere di nuovo il pulsante non crea mai
+duplicati e, dopo un errore, riprende da dove si era fermato. I sensori si basano sui sensori di sistolica e
+diastolica scelti nella card (o trovati in automatico); se cambi misuratore, elimina gli helper e creali di
+nuovo.
+
+Le statistiche giornaliere si accumulano dal giorno della creazione in poi: i giorni precedenti arrivano
+ancora dalle statistiche dei sensori del misuratore. L'`input_datetime` è utile anche nelle automazioni, per
+esempio per ricordarti di misurare la pressione se oggi non l'hai ancora fatto.
+
+Per rimuoverli: elimina i due sensori e l'`input_datetime` in *Impostazioni → Dispositivi e servizi →
+Aiutanti*, l'automazione in *Impostazioni → Automazioni e scene* e svuota le tre opzioni nell'editor. Se
+preferisci lo YAML, il package [`examples/packages/blood_pressure.yaml`](examples/packages/blood_pressure.yaml)
+crea le stesse entità (sostituisci i sensori segnaposto con i tuoi).
 
 ## Lingue
 
@@ -155,13 +206,18 @@ chiavi di `en`.
   cambia i sensori e non può essere vista.
 - **Nessuno storico oltre gli ultimi giorni**: i sensori devono avere uno `state_class` perché Home Assistant
   conservi le statistiche a lungo termine; senza, è disponibile solo la cronologia del recorder.
+- **Manca il pulsante "Crea helper"**: solo gli amministratori possono creare gli helper; chiedi a uno di
+  loro di premerlo una volta.
+- **"Non è stato possibile creare tutti gli helper"**: gli helper creati prima dell'errore restano
+  collegati. Risolvi la causa indicata nel messaggio e premi di nuovo il pulsante: riprende da dove si era
+  fermato.
 - **Due copie caricate**: la console del browser avvisa quando la card è caricata due volte (per esempio una
   risorsa manuale e HACS): tieni solo `/hacsfiles/blood-pressure-card/blood-pressure-card.js`.
 
 ## Sviluppo
 
 ```bash
-npm test             # test unitari di ricerca, classificazione, storico e traduzioni (Node 20+)
+npm test             # test unitari di ricerca, classificazione, storico, helper e traduzioni (Node 20+)
 npm install && npx playwright install chromium   # una volta, per i due comandi seguenti
 npm run test:e2e     # test nel browser con un Home Assistant simulato
 npm run screenshots  # rigenera le immagini in images/ con dati dimostrativi
