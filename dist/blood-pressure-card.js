@@ -27,7 +27,7 @@
  * The source is plain ASCII: non-ASCII characters are written as \u escapes.
  */
 
-const BPC_VERSION = "1.1.0";
+const BPC_VERSION = "1.2.0";
 const BPC_TAG = "blood-pressure-card";
 const BPC_EDITOR_TAG = BPC_TAG + "-editor";
 const BPC_REPO_URL = "https://github.com/artech-lab/blood-pressure-card";
@@ -61,9 +61,9 @@ const BPC_NEVER = "2000-01-01 00:00:00";
 const BPC_NEVER_MS = Date.UTC(2001, 0, 1);
 
 const BPC_DEFAULTS = {
-  history_days: 30,
+  history_days: 60,
   show_history: true,
-  show_average: true,
+  show_average: false,
   show_reference: true
 };
 
@@ -71,13 +71,21 @@ const BPC_DEFAULTS = {
    lower bound (mmHg) of every category after the first. A reading takes the
    higher category reached by either value ("and/or" in all three guidelines).
    A repeated bound means the category in between cannot be reached by that
-   value alone: in the ACC/AHA table "elevated" needs a diastolic below 80. */
+   value alone: in the ACC/AHA table "elevated" needs a diastolic below 80.
+   "scales" (optional) fixes the drawing of the bands: range and segment bounds of
+   each value. Without it the bands follow the categories. */
 const BPC_GUIDELINES = {
   // 2023 ESH Guidelines for the management of arterial hypertension.
   esh_2023: {
     categories: ["optimal", "normal", "high_normal", "grade_1_hypertension", "grade_2_hypertension", "grade_3_hypertension"],
     systolic: [120, 130, 140, 160, 180],
-    diastolic: [80, 85, 90, 100, 110]
+    diastolic: [80, 85, 90, 100, 110],
+    /* Five segments as in the original card: grade 3 has no segment of its own, a
+       value >= 180 / 110 sits at the end of the red segment. */
+    scales: {
+      sys: { min: 90, max: 190, cuts: [120, 130, 140, 160] },
+      dia: { min: 50, max: 120, cuts: [80, 85, 90, 100] }
+    }
   },
   // 2024 ESC Guidelines for the management of elevated blood pressure and hypertension.
   esc_2024: {
@@ -127,23 +135,24 @@ const BPC_I18N = {
     now: "just now",
     no_sensors: "No blood pressure sensors found",
     no_sensors_hint: "Pick the systolic and diastolic sensors (mmHg) of your monitor in the card editor.",
-    no_values: "Waiting for the first reading",
-    reference: "{label}: below {sys}/{dia} mmHg",
+    rel_min: "{n} min ago",
+    rel_hour: "{n} h ago",
+    rel_day: "{n} d ago",
+    reference: "{label}: below {sys}/{dia} mmHg ({source})",
     average: "7-day average",
-    history: "Last {n} days",
+    history: "{n}-day history",
     loading: "Loading...",
     no_history: "No readings in this period",
     history_error: "History not available",
-    readings: "{n} readings",
-    reading: "1 reading",
-    from_statistics: "estimated from statistics",
-    from_helpers: "from the daily sensors",
     min: "min",
     mean: "avg",
     max: "max",
-    g_esh_2023: "ESH 2023 guideline",
+    g_esh_2023: "ESC/ESH guidelines",
     g_esc_2024: "ESC 2024 guideline",
     g_acc_aha_2025: "ACC/AHA 2025 guideline",
+    s_esh_2023: "ESC",
+    s_esc_2024: "ESC 2024",
+    s_acc_aha_2025: "ACC/AHA 2025",
     c_optimal: "Optimal",
     c_normal: "Normal",
     c_high_normal: "High-normal",
@@ -188,28 +197,29 @@ const BPC_I18N = {
     default_title: "Pressione arteriosa",
     systolic: "Sistolica",
     diastolic: "Diastolica",
-    measured: "misurata {when}",
+    measured: "misura {when}",
     measured_on: "misurata il {date}",
     now: "adesso",
     no_sensors: "Nessun sensore di pressione trovato",
     no_sensors_hint: "Scegli i sensori di pressione sistolica e diastolica (mmHg) del misuratore nell'editor della card.",
-    no_values: "In attesa della prima misurazione",
-    reference: "{label}: sotto {sys}/{dia} mmHg",
+    rel_min: "{n} min fa",
+    rel_hour: "{n} h fa",
+    rel_day: "{n} g fa",
+    reference: "{label}: sotto {sys}/{dia} mmHg ({source})",
     average: "Media 7 giorni",
-    history: "Ultimi {n} giorni",
+    history: "Storico {n} giorni",
     loading: "Caricamento...",
-    no_history: "Nessuna misurazione nel periodo",
+    no_history: "Nessuna misura nel periodo",
     history_error: "Storico non disponibile",
-    readings: "{n} misurazioni",
-    reading: "1 misurazione",
-    from_statistics: "stimato dalle statistiche",
-    from_helpers: "dai sensori giornalieri",
     min: "min",
     mean: "media",
     max: "max",
-    g_esh_2023: "linee guida ESH 2023",
+    g_esh_2023: "linee guida ESC/ESH",
     g_esc_2024: "linee guida ESC 2024",
     g_acc_aha_2025: "linee guida ACC/AHA 2025",
+    s_esh_2023: "ESC",
+    s_esc_2024: "ESC 2024",
+    s_acc_aha_2025: "ACC/AHA 2025",
     c_optimal: "Ottimale",
     c_normal: "Normale",
     c_high_normal: "Normale-alta",
@@ -328,16 +338,14 @@ function bpcNiceStep(raw) {
   return 10 * p;
 }
 
+/* "just now", "N min ago", "N h ago", "N d ago", as in the original inline card. */
 function bpcRelative(hass, ms, now) {
   const lang = bpcLang(hass);
   const s = Math.max(0, ((now || Date.now()) - ms) / 1000);
   if (s < 90) return bpcT(lang, "now");
-  const [v, u] = s < 3600 ? [Math.round(s / 60), "minute"] : s < 86400 ? [Math.round(s / 3600), "hour"] : [Math.round(s / 86400), "day"];
-  try {
-    return new Intl.RelativeTimeFormat(bpcLocale(hass), { numeric: "auto" }).format(-v, u);
-  } catch (e) {
-    return v + " " + u;
-  }
+  if (s < 3600) return bpcT(lang, "rel_min", { n: Math.round(s / 60) });
+  if (s < 86400) return bpcT(lang, "rel_hour", { n: Math.round(s / 3600) });
+  return bpcT(lang, "rel_day", { n: Math.round(s / 86400) });
 }
 
 /* ------------------------------------------------------------------ */
@@ -611,16 +619,17 @@ function bpcEditorSchema(lang) {
 /* Card                                                                */
 /* ------------------------------------------------------------------ */
 
+/* The look of the original inline card (v2.0.2); .empty, .seg.first / .seg.last
+   (zero-width segments), .fitem (pulse and average) and [hidden] are additions. */
 const BPC_STYLE = `
-ha-card{padding:12px 16px 14px;overflow:hidden}
+ha-card{padding:12px 16px 14px}
 .head{display:flex;align-items:center;gap:10px;padding:2px 0 10px}
-.hic{width:38px;height:38px;min-width:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--red-color,#f44336);background:color-mix(in srgb,var(--red-color,#f44336) 20%,transparent)}
-.hic ha-icon{--mdc-icon-size:21px;display:block;line-height:0}
+.hic{width:38px;height:38px;min-width:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--red-color,#f44336);background:color-mix(in srgb, var(--red-color,#f44336) 20%, transparent)}
+.hic ha-icon{--mdc-icon-size:21px}
 .ht{flex:1;min-width:0}
 .htitle{font-size:16px;font-weight:600;color:var(--primary-text-color);line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .hsub{font-size:11.5px;color:var(--secondary-text-color);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.big{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:12px}
-.vals{cursor:pointer;display:flex;align-items:baseline;gap:8px}
+.big{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:12px;cursor:pointer}
 .bigval{font-size:30px;font-weight:700;line-height:1;color:var(--primary-text-color)}
 .slash{color:var(--secondary-text-color)}
 .bigunit{font-size:13px;color:var(--secondary-text-color)}
@@ -633,38 +642,35 @@ ha-card{padding:12px 16px 14px;overflow:hidden}
 .bandwrap{position:relative;padding-bottom:14px}
 .band{position:relative;display:flex;height:10px;border-radius:5px}
 .seg{height:100%}
-.seg.first{border-radius:5px 0 0 5px}.seg.last{border-radius:0 5px 5px 0}
-.marker{position:absolute;top:-3px;width:16px;height:16px;border-radius:50%;box-sizing:border-box;border:2.5px solid var(--card-background-color,#1c1c1c);transform:translateX(-8px);transition:left .4s ease}
+.seg.first{border-radius:5px 0 0 5px}.seg.last{border-radius:0 5px 5px 0}.seg.first.last{border-radius:5px}
+.marker{position:absolute;top:-3px;width:16px;height:16px;border-radius:50%;box-sizing:border-box;border:2.5px solid var(--card-background-color,#1c1c1c);transform:translateX(-8px)}
 .ticks{position:absolute;left:0;right:0;top:12px;height:12px}
 .tick{position:absolute;transform:translateX(-50%);font-size:9.5px;color:var(--secondary-text-color)}
-.wait{font-size:12px;color:var(--secondary-text-color);margin:-4px 0 10px}
-.hist{margin-top:4px;padding-top:10px;border-top:1px solid var(--divider-color)}
-.histhead{font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--secondary-text-color);margin-bottom:6px}
-.plot{width:100%;position:relative}
-.plot svg{display:block;width:100%;height:auto;cursor:crosshair}
-.grid-line{stroke:color-mix(in srgb,var(--primary-text-color) 12%,transparent)}
-.day-line{stroke:color-mix(in srgb,var(--primary-text-color) 7%,transparent)}
-.ylab{font:400 10px sans-serif;fill:var(--secondary-text-color)}
-.xlab{font:500 10px sans-serif;fill:var(--secondary-text-color);text-anchor:middle}
-.msg{font-size:12px;color:var(--secondary-text-color);padding:10px 0;text-align:center}
-.empty{padding:16px;text-align:center}
-.empty .t{font-size:14px;font-weight:600;color:var(--primary-text-color);margin-bottom:4px}
-.empty .h{font-size:12px;color:var(--secondary-text-color)}
-.tip{position:absolute;top:2px;left:0;pointer-events:none;z-index:2;background:var(--card-background-color,#1c1c1c);border:1px solid var(--divider-color);border-radius:10px;padding:7px 10px;font-size:11.5px;color:var(--primary-text-color);white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.15)}
-.tiph{font-weight:700;margin-bottom:3px}
-.tiprow{color:var(--secondary-text-color);line-height:1.5}
-.tipv{color:var(--primary-text-color);font-weight:600}
-.tipn{color:var(--secondary-text-color);font-size:10.5px;margin-top:2px}
-.foot{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:12px;padding-top:10px;border-top:1px solid var(--divider-color)}
+.foot{display:flex;align-items:center;gap:10px;margin-top:2px;padding-top:10px;border-top:1px solid var(--divider-color)}
 .fitem{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--primary-text-color);font-weight:600}
-.fitem ha-icon{--mdc-icon-size:16px;display:block;line-height:0}
+.fitem ha-icon{--mdc-icon-size:16px}
 .pulse{cursor:pointer}
 .pulse ha-icon{color:var(--red-color,#f44336)}
 .avg ha-icon{color:var(--secondary-text-color)}
 .flab{font-weight:400;color:var(--secondary-text-color)}
 .ref{margin-left:auto;font-size:11px;color:var(--secondary-text-color);white-space:nowrap}
+.hist{margin-top:12px;padding-top:10px;border-top:1px solid var(--divider-color)}
+.histhead{font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--secondary-text-color);margin-bottom:6px}
+.plot{width:100%;position:relative}
+.plot svg{display:block;width:100%;height:auto;cursor:crosshair}
+.grid-line{stroke:color-mix(in srgb, var(--primary-text-color) 12%, transparent)}
+.day-line{stroke:color-mix(in srgb, var(--primary-text-color) 7%, transparent)}
+.ylab{font:400 10px sans-serif;fill:var(--secondary-text-color)}
+.xlab{font:500 10px sans-serif;fill:var(--secondary-text-color);text-anchor:middle}
+.msg{font-size:12px;color:var(--secondary-text-color);padding:10px 0;text-align:center}
+.tip{position:absolute;top:2px;left:0;pointer-events:none;z-index:2;background:var(--card-background-color,#1c1c1c);border:1px solid var(--divider-color);border-radius:10px;padding:7px 10px;font-size:11.5px;color:var(--primary-text-color);white-space:nowrap}
+.tiph{font-weight:700;margin-bottom:3px}
+.tiprow{display:flex;align-items:center;gap:5px;color:var(--secondary-text-color);line-height:1.5}
+.tipv{color:var(--primary-text-color);font-weight:600}
+.empty{padding:16px;text-align:center}
+.empty .t{font-size:14px;font-weight:600;color:var(--primary-text-color);margin-bottom:4px}
+.empty .h{font-size:12px;color:var(--secondary-text-color)}
 [hidden]{display:none !important}
-@media (prefers-reduced-motion: reduce){.marker{transition:none}}
 `;
 
 class BloodPressureCard extends HTMLElement {
@@ -719,6 +725,7 @@ class BloodPressureCard extends HTMLElement {
   }
 
   _scales(g) {
+    if (g.scales) return g.scales;
     const s = g.systolic, d = g.diastolic;
     return {
       sys: { min: 90, max: Math.max(190, s[s.length - 1] + 20), cuts: s },
@@ -731,7 +738,7 @@ class BloodPressureCard extends HTMLElement {
     const n = g.categories.length;
     const widths = [];
     let prev = scale.min;
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i <= scale.cuts.length; i++) {
       const to = i < scale.cuts.length ? scale.cuts[i] : scale.max;
       widths.push([i, Math.max(0, to - prev)]);
       prev = Math.max(prev, to);
@@ -759,9 +766,8 @@ class BloodPressureCard extends HTMLElement {
 <ha-card>
   <div class="head"><div class="hic"><ha-icon icon="${bpcEsc(c.icon || "mdi:heart-pulse")}"></ha-icon></div>
     <div class="ht"><div class="htitle">${bpcEsc(title)}</div><div class="hsub" id="hsub"></div></div></div>
-  <div class="big"><div class="vals" id="vals" role="button" tabindex="0"><span class="bigval"><span id="v_sys">--</span><span class="slash">/</span><span id="v_dia">--</span></span>
-    <span class="bigunit">mmHg</span></div><span class="chip" id="chip" hidden></span></div>
-  <div class="wait" id="wait" hidden>${bpcEsc(bpcT(lang, "no_values"))}</div>
+  <div class="big" id="big" data-entity="sys" role="button" tabindex="0"><span class="bigval"><span id="v_sys">--</span><span class="slash">/</span><span id="v_dia">--</span></span>
+    <span class="bigunit">mmHg</span><span class="chip" id="chip" hidden></span></div>
   <div class="row" id="row_sys" data-entity="sys" role="button" tabindex="0"><div class="rowhead"><span class="rlab">${bpcEsc(bpcT(lang, "systolic"))}</span>
     <span class="rval" id="rv_sys">--</span><span class="rzone" id="rz_sys"></span></div>${this._band(g, sc.sys, "sys")}</div>
   <div class="row" id="row_dia" data-entity="dia" role="button" tabindex="0"><div class="rowhead"><span class="rlab">${bpcEsc(bpcT(lang, "diastolic"))}</span>
@@ -776,10 +782,10 @@ class BloodPressureCard extends HTMLElement {
 </ha-card>`;
     const root = this.shadowRoot;
     const open = (ev) => {
-      const el = ev.target.closest && ev.target.closest("[data-entity],#vals");
+      const el = ev.target.closest && ev.target.closest("[data-entity]");
       if (!el) return;
       if (ev.type === "keydown" && ev.key !== "Enter" && ev.key !== " ") return;
-      const which = el.id === "vals" ? "sys" : el.dataset.entity;
+      const which = el.dataset.entity;
       const id = which === "sys" ? this._c.systolic_entity : which === "dia" ? this._c.diastolic_entity : this._c.pulse_entity;
       if (!id) return;
       if (ev.type === "keydown") ev.preventDefault();
@@ -790,7 +796,7 @@ class BloodPressureCard extends HTMLElement {
     this._built = true;
   }
 
-  _setRow(key, v, scale, g, lang) {
+  _setRow(key, v, scale, bounds, g, lang) {
     const $ = (id) => this.shadowRoot.getElementById(id);
     const mk = $(key + "_mk"), rv = $("rv_" + key), rz = $("rz_" + key), big = $("v_" + key);
     if (v === null) {
@@ -802,7 +808,7 @@ class BloodPressureCard extends HTMLElement {
       big.style.color = "";
       return;
     }
-    const zi = bpcLevel(v, scale.cuts);
+    const zi = bpcLevel(v, bounds);
     const color = bpcColor(zi, g.categories.length);
     mk.hidden = false;
     mk.style.left = Math.max(0, Math.min(100, (v - scale.min) / (scale.max - scale.min) * 100)) + "%";
@@ -846,18 +852,17 @@ class BloodPressureCard extends HTMLElement {
 
     const $ = (id) => this.shadowRoot.getElementById(id);
     $("hsub").textContent = [bpcT(lang, "g_" + c.guideline), when].filter(Boolean).join(" " + BPC_DOT + " ");
-    this._setRow("sys", sys, sc.sys, g, lang);
-    this._setRow("dia", dia, sc.dia, g, lang);
-    $("wait").hidden = !(sys === null || dia === null);
+    this._setRow("sys", sys, sc.sys, g.systolic, g, lang);
+    this._setRow("dia", dia, sc.dia, g.diastolic, g, lang);
     const chip = $("chip");
-    chip.hidden = sys === null || dia === null;
+    chip.hidden = sys === null && dia === null;
     if (!chip.hidden) {
       const ci = bpcClassify(g, sys, dia);
       chip.textContent = bpcT(lang, "c_" + g.categories[ci]);
       chip.style.background = bpcColor(ci, g.categories.length);
     }
     const showPulse = pulse !== null;
-    const showAvg = c.show_average !== false && !!avg;
+    const showAvg = !!c.show_average && !!avg;
     const showRef = c.show_reference !== false;
     $("pulse").hidden = !showPulse;
     if (showPulse) $("pv").textContent = Math.round(pulse) + " bpm";
@@ -865,7 +870,8 @@ class BloodPressureCard extends HTMLElement {
     if (showAvg) $("av").textContent = Math.round(avg.systolic) + "/" + Math.round(avg.diastolic);
     $("ref").hidden = !showRef;
     if (showRef) {
-      $("ref").textContent = bpcT(lang, "reference", { label: bpcT(lang, "c_" + g.categories[0]), sys: g.systolic[0], dia: g.diastolic[0] });
+      $("ref").textContent = bpcT(lang, "reference", { label: bpcT(lang, "c_" + g.categories[0]), sys: g.systolic[0],
+        dia: g.diastolic[0], source: bpcT(lang, "s_" + c.guideline) });
     }
     $("foot").hidden = !(showPulse || showAvg || showRef);
     $("hist").hidden = c.show_history === false;
@@ -882,7 +888,7 @@ class BloodPressureCard extends HTMLElement {
   _maybeFetch(force) {
     const c = this._c, h = this._hass;
     if (!h || !c || !this._built || this._loading) return;
-    if (c.show_history === false && c.show_average === false) return;
+    if (c.show_history === false && !c.show_average) return;
     const st = (id) => (id && h.states[id] ? h.states[id].state : "");
     const today = this._todayIds(c);
     const sig = [c.systolic_entity, c.diastolic_entity, c.history_days, st(c.systolic_entity), st(c.diastolic_entity),
@@ -977,11 +983,12 @@ class BloodPressureCard extends HTMLElement {
       const y = yOf(v);
       svg += `<line class="grid-line" x1="${L}" y1="${y.toFixed(1)}" x2="${R}" y2="${y.toFixed(1)}"/><text class="ylab" x="${R + 6}" y="${(y + 3.5).toFixed(1)}">${Math.round(v)}</text>`;
     }
-    const weekly = d.n <= 45;
+    /* Mondays as day/month up to 90 days, as in the original card; months beyond. */
+    const weekly = d.n <= 90;
     for (const dt = new Date(d.start); dt.getTime() < d.end; dt.setDate(dt.getDate() + 1)) {
       if (weekly ? dt.getDay() !== 1 : dt.getDate() !== 1) continue;
       const x = xOf(dt.getTime()).toFixed(1);
-      const label = dt.toLocaleDateString(bpcLocale(h), weekly ? { day: "numeric", month: "numeric" } : { month: "short" });
+      const label = weekly ? dt.getDate() + "/" + (dt.getMonth() + 1) : dt.toLocaleDateString(bpcLocale(h), { month: "short" });
       svg += `<line class="day-line" x1="${x}" y1="${T}" x2="${x}" y2="${B}"/><text class="xlab" x="${x}" y="${B + 14}">${bpcEsc(label)}</text>`;
     }
     const slot = (R - L) / d.n;
@@ -992,7 +999,6 @@ class BloodPressureCard extends HTMLElement {
       const ms = bpcDayStart(x.date);
       const cx = xOf(ms + BPC_DAY / 2);
       const color = bpcColor(this._dayLevel(x, g), g.categories.length);
-      const fade = x.source === "statistics" ? ' opacity="0.6"' : "";
       if (x.systolic && x.diastolic) {
         svg += `<line x1="${cx.toFixed(1)}" y1="${yOf(x.systolic.max).toFixed(1)}" x2="${cx.toFixed(1)}" y2="${yOf(x.diastolic.min).toFixed(1)}" stroke="${color}" stroke-width="1.2" opacity="0.45"/>`;
       }
@@ -1004,7 +1010,7 @@ class BloodPressureCard extends HTMLElement {
           yA = mid - bw / 2;
           yB = mid + bw / 2;
         }
-        svg += `<line x1="${cx.toFixed(1)}" y1="${yA.toFixed(1)}" x2="${cx.toFixed(1)}" y2="${yB.toFixed(1)}" stroke="${color}" stroke-width="${bw.toFixed(1)}" stroke-linecap="round"${fade}/>`;
+        svg += `<line x1="${cx.toFixed(1)}" y1="${yA.toFixed(1)}" x2="${cx.toFixed(1)}" y2="${yB.toFixed(1)}" stroke="${color}" stroke-width="${bw.toFixed(1)}" stroke-linecap="round"/>`;
       }
       this._points.push({ ms, cx, x });
     }
@@ -1032,10 +1038,11 @@ class BloodPressureCard extends HTMLElement {
       const x = best.x, zi = this._dayLevel(x, g);
       const row = (name, b) => !b ? "" :
         `<div class="tiprow">${name} ${bpcEsc(bpcT(lang, "min"))} <span class="tipv">${Math.round(b.min)}</span> ${BPC_DOT} ${bpcEsc(bpcT(lang, "mean"))} <span class="tipv">${Math.round(b.mean)}</span> ${BPC_DOT} ${bpcEsc(bpcT(lang, "max"))} <span class="tipv">${Math.round(b.max)}</span></div>`;
-      const note = x.source === "statistics" ? bpcT(lang, "from_statistics") : x.source === "helpers" ? bpcT(lang, "from_helpers") : x.count === 1 ? bpcT(lang, "reading") : bpcT(lang, "readings", { n: x.count });
-      const day = new Date(best.ms).toLocaleDateString(bpcLocale(h), { weekday: "short", day: "numeric", month: "numeric" });
+      /* "Mon 17/11": weekday in the language of the profile, day/month as in the original card */
+      const dt = new Date(best.ms);
+      const day = dt.toLocaleDateString(bpcLocale(h), { weekday: "short" }).replace(/\.$/, "") + " " + dt.getDate() + "/" + (dt.getMonth() + 1);
       tip.innerHTML = `<div class="tiph">${bpcEsc(day)} <span style="color:${bpcColor(zi, g.categories.length)}">${bpcEsc(bpcT(lang, "c_" + g.categories[zi]))}</span></div>` +
-        row("SYS", x.systolic) + row("DIA", x.diastolic) + `<div class="tipn">${bpcEsc(note)}</div>`;
+        row("SYS", x.systolic) + row("DIA", x.diastolic);
       tip.hidden = false;
       const tw = tip.offsetWidth;
       tip.style.left = Math.max(4, Math.min(r.width - tw - 4, px - tw / 2)) + "px";
@@ -1271,7 +1278,7 @@ class BloodPressureCardEditor extends HTMLElement {
       icon: this._config.icon,
       history_days: shown.history_days,
       show_history: shown.show_history !== false,
-      show_average: shown.show_average !== false,
+      show_average: !!shown.show_average,
       show_reference: shown.show_reference !== false,
       last_entity: this._config.last_entity || undefined,
       systolic_today_entity: this._config.systolic_today_entity || undefined,

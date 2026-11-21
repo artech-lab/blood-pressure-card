@@ -58,9 +58,11 @@ editor schema, CSS, the card class `BloodPressureCard`, one-click helpers (`bpcC
 - **Guidelines**: each one lists its categories and, per value, the lower bound of every category after the
   first. A reading takes the higher category of the two values (`bpcClassify`). A repeated bound makes a
   category unreachable by that value alone (ACC/AHA "elevated" needs a diastolic below 80); the band
-  drawing skips zero-width segments. A new guideline needs: an entry in `BPC_GUIDELINES`, `g_<key>`,
-  `ed_<key>` and `c_<category>` in both languages, a palette if its number of categories is new, a table in
-  both READMEs and classification tests.
+  drawing skips zero-width segments. An optional `scales` fixes the drawing of the bands (ESH 2023: five
+  segments as in the original inline card, grade 3 at the end of the red one). A new guideline needs: an
+  entry in `BPC_GUIDELINES`, `g_<key>`, `ed_<key>`, `s_<key>` (short name in the reference) and
+  `c_<category>` in both languages, a palette if its number of categories is new, a table in both READMEs
+  and classification tests.
 - **Discovery**: sensors in mmHg matched by words in entity id, friendly name and translation key
   (`BPC_WORDS`), pair on the same device first; pulse = bpm sensor of that device, `pulse` before `heart`,
   averages last. Hidden and diagnostic entities are skipped. The pulse is guessed only when neither

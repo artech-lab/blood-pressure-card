@@ -40,14 +40,14 @@ function demo(lang, now) {
   const midnight = (n) => { const d = new Date(now - n * DAY); d.setHours(0, 0, 0, 0); return d.getTime(); };
   const sysRaw = [], diaRaw = [], sysStats = [], diaStats = [];
   let last = { s: 132, d: 85 };
-  for (let n = 29; n >= 0; n--) {
+  for (let n = 55; n >= 0; n--) {
     const skip = n % 7 === 3 || n % 11 === 5;
     const count = skip ? 0 : rand() < 0.45 ? 2 : 1;
     const day = { s: [], d: [] };
     for (let k = 0; k < count; k++) {
       const t = midnight(n) + (k === 0 ? 7.5 : 20.2) * H + rand() * 1800000;
       if (n === 0 && t > now - 2 * H) continue;
-      const s = Math.round(120 + rand() * 18 + (n > 18 ? 6 : 0)), d = Math.round(76 + rand() * 11 + (n > 18 ? 3 : 0));
+      const s = Math.round(120 + rand() * 18 + (n > 35 ? 6 : 0)), d = Math.round(76 + rand() * 11 + (n > 35 ? 3 : 0));
       day.s.push([t, s]);
       day.d.push([t + 3000, d]);
     }

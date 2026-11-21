@@ -24,13 +24,13 @@ any other integration): no helpers, no YAML, no restarts.
   guideline, the category of each value and of the reading. When the two values fall in different
   categories, the higher one applies, as all three guidelines prescribe.
 - **Daily history** (7–365 days): one capsule per value from the lowest to the highest reading of the day,
-  coloured by the category of the daily mean; tooltip with min, average, max and number of readings.
+  coloured by the category of the daily mean; tooltip with min, average and max of each value.
 - **Exact readings**: while the recorder keeps them (10 days by default) the history is built from the
   actual measurements; older days come from the long-term statistics. Values restored after a restart are
   not counted as measurements.
 - **Optional helpers in one click**: for an exact and permanent daily history, and the time of the last
   measurement in automations. See [Optional: helpers for history and automations](#optional-helpers-for-history-and-automations).
-- **Pulse**, **7-day average** and **time of the last measurement**.
+- **Pulse**, **time of the last measurement** and an optional **7-day average**.
 - **English and Italian**, following the language and date format of your Home Assistant profile.
 - **Native look**: theme colours, light and dark mode, sections layout, keyboard accessible, a visual editor
   for every option.
@@ -85,9 +85,9 @@ Every option is optional and available in the visual editor.
 | `guideline` | `esh_2023` (`acc_aha_2025` if the country of Home Assistant is the United States) | `esh_2023`, `esc_2024` or `acc_aha_2025`. |
 | `title` | "Blood pressure" (localized) | Card title. |
 | `icon` | `mdi:heart-pulse` | Header icon. |
-| `history_days` | `30` | Days in the history chart (7–365). |
+| `history_days` | `60` | Days in the history chart (7–365). |
 | `show_history` | `true` | Daily history chart. |
-| `show_average` | `true` | 7-day average: mean of the daily means of the last 7 days. |
+| `show_average` | `false` | 7-day average: mean of the daily means of the last 7 days. |
 | `show_reference` | `true` | Upper limit of the lowest category of the guideline. |
 | `last_entity` | – | `input_datetime` with the date and time of the last measurement ([helpers](#optional-helpers-for-history-and-automations)). |
 | `systolic_today_entity` | – | Sensor with today's systolic value, whose daily statistics feed the history ([helpers](#optional-helpers-for-history-and-automations)). |
@@ -110,6 +110,9 @@ Values in mmHg. A reading takes the higher category reached by either value.
 | Hypertension grade 1 | 140–159 | and/or | 90–99 |
 | Hypertension grade 2 | 160–179 | and/or | 100–109 |
 | Hypertension grade 3 | ≥ 180 | and/or | ≥ 110 |
+
+The ESH bands have five segments on the scales 90–190 and 50–120 mmHg: grade 3 has no segment of
+its own, so a reading of 180/110 or more sits at the end of the red segment and is labelled *Hypertension 3*.
 
 **ESC 2024** (European Society of Cardiology) [2]
 
@@ -140,10 +143,9 @@ Values in mmHg. A reading takes the higher category reached by either value.
   unchanged after a restart or after `unavailable` is not a reading.
 - **Older days**: before the start of the recorder history the card uses the daily long-term statistics
   and shows only the days in which the value moved (a flat day is the previous reading carried over). These
-  days are slightly faded and marked *estimated from statistics*: their range can include the previous
-  reading, and the mean is weighted by time.
-- **With the helpers** (optional), the daily statistics of the two "today" sensors come first: days marked
-  *from the daily sensors*, not faded. In order of precedence, for each day:
+  days can include the previous reading in their range, and the mean is weighted by time.
+- **With the helpers** (optional), the daily statistics of the two "today" sensors come first. In order of
+  precedence, for each day:
   - after the first day of the recorder history: the exact readings, then the helpers;
   - on that first day, whose history can be partial: the helpers, then the readings, then the statistics;
   - before it: the helpers and, only for the days before the first helper day, the statistics of the

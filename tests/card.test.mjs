@@ -82,7 +82,7 @@ test("every guideline, category and editor field has a label and a palette", () 
     const t = api.BPC_I18N[lang];
     for (const n of names) assert.ok(t["ed_" + n], lang + ": ed_" + n);
     for (const [key, g] of Object.entries(api.BPC_GUIDELINES)) {
-      assert.ok(t["g_" + key] && t["ed_" + key], lang + ": " + key);
+      assert.ok(t["g_" + key] && t["ed_" + key] && t["s_" + key], lang + ": " + key);
       for (const c of g.categories) assert.ok(t["c_" + c], lang + ": c_" + c);
     }
   }
@@ -105,7 +105,10 @@ test("language follows Home Assistant, then the browser, then English", () => {
 });
 
 test("translation with placeholders and fallback", () => {
-  assert.equal(api.bpcT("it", "reference", { label: "Ottimale", sys: 120, dia: 80 }), "Ottimale: sotto 120/80 mmHg");
+  assert.equal(api.bpcT("it", "reference", { label: "Ottimale", sys: 120, dia: 80, source: "ESC" }), "Ottimale: sotto 120/80 mmHg (ESC)");
+  assert.equal(api.bpcT("en", "reference", { label: "Optimal", sys: 120, dia: 80, source: "ESC" }), "Optimal: below 120/80 mmHg (ESC)");
+  assert.equal(api.bpcT("it", "history", { n: 60 }), "Storico 60 giorni");
+  assert.equal(api.bpcT("en", "history", { n: 60 }), "60-day history");
   assert.equal(api.bpcT("xx", "systolic"), "Systolic");
   assert.equal(api.bpcT("it", "no_such_key"), "no_such_key");
   assert.equal(api.bpcEsc('<b a="1">&\''), "&lt;b a=&quot;1&quot;&gt;&amp;&#39;");
@@ -125,6 +128,18 @@ test("ESH 2023 classification", () => {
   assert.equal(c(180, 90), "grade_3_hypertension");
   assert.equal(c(135, 110), "grade_3_hypertension");
   assert.equal(c(135, null), "high_normal", "a missing value does not count");
+  assert.equal(c(185, 112), "grade_3_hypertension");
+});
+
+test("ESH 2023 bands: five segments as in the original card, grade 3 at the end of the red one", () => {
+  const g = api.BPC_GUIDELINES.esh_2023;
+  assert.deepEqual(plain(g.scales), {
+    sys: { min: 90, max: 190, cuts: [120, 130, 140, 160] },
+    dia: { min: 50, max: 120, cuts: [80, 85, 90, 100] }
+  });
+  assert.equal(g.categories.length, 6, "the classification keeps grade 3");
+  assert.equal(api.BPC_GUIDELINES.esc_2024.scales, undefined, "ESC and ACC/AHA keep the bands of their categories");
+  assert.equal(api.BPC_GUIDELINES.acc_aha_2025.scales, undefined);
 });
 
 test("ESC 2024 and ACC/AHA 2025 classification", () => {
@@ -177,7 +192,8 @@ test("configuration: overrides, options of earlier versions, defaults", () => {
   let c = api.bpcResolve({}, hass);
   assert.equal(c.systolic_entity, "sensor.withings_systolic_blood_pressure");
   assert.equal(c.guideline, "esh_2023");
-  assert.equal(c.history_days, 30);
+  assert.equal(c.history_days, 60);
+  assert.equal(c.show_average, false, "the 7-day average is off by default");
   c = api.bpcResolve({ sys_entity: "sensor.s", dia_entity: "sensor.d", history_days: 900 }, hass);
   assert.equal(c.systolic_entity, "sensor.s");
   assert.equal(c.diastolic_entity, "sensor.d");
@@ -188,8 +204,8 @@ test("configuration: overrides, options of earlier versions, defaults", () => {
 });
 
 test("the editor writes a clean configuration", () => {
-  const out = plain(api.bpcCleanConfig({ sys_entity: "sensor.s", dia_entity: "sensor.d", title: "", history_days: 30,
-    show_history: false, guideline: "esc_2024" }));
+  const out = plain(api.bpcCleanConfig({ sys_entity: "sensor.s", dia_entity: "sensor.d", title: "", history_days: 60,
+    show_history: false, show_average: false, guideline: "esc_2024" }));
   assert.deepEqual(out, { systolic_entity: "sensor.s", diastolic_entity: "sensor.d", show_history: false,
     guideline: "esc_2024", type: "custom:blood-pressure-card" });
 });
@@ -315,8 +331,13 @@ test("7-day average of the daily means", () => {
 test("relative time", () => {
   const now = T0 + 5 * H;
   assert.equal(api.bpcRelative({ language: "en" }, now - 30000, now), "just now");
-  assert.equal(api.bpcRelative({ language: "en" }, now - 2 * H, now), "2 hours ago");
-  assert.equal(api.bpcRelative({ language: "it" }, now - DAY, now), "ieri");
+  assert.equal(api.bpcRelative({ language: "en" }, now - 10 * 60000, now), "10 min ago");
+  assert.equal(api.bpcRelative({ language: "en" }, now - 2 * H, now), "2 h ago");
+  assert.equal(api.bpcRelative({ language: "en" }, now - 3 * DAY, now), "3 d ago");
+  assert.equal(api.bpcRelative({ language: "it" }, now - 60000, now), "adesso");
+  assert.equal(api.bpcRelative({ language: "it" }, now - 5 * 60000, now), "5 min fa");
+  assert.equal(api.bpcRelative({ language: "it" }, now - 3 * H, now), "3 h fa");
+  assert.equal(api.bpcRelative({ language: "it" }, now - DAY, now), "1 g fa");
 });
 
 /* ---------- one-click helpers ---------- */

@@ -24,14 +24,14 @@ Connect, ESPHome o qualsiasi altra integrazione): niente helper, niente YAML, ne
   scelta, la categoria di ciascun valore e della misurazione. Se i due valori cadono in categorie diverse
   vale la più alta, come prescrivono tutte e tre le linee guida.
 - **Storico giornaliero** (7–365 giorni): una capsula per valore dalla misurazione più bassa alla più alta
-  del giorno, colorata secondo la categoria della media del giorno; tooltip con minimo, media, massimo e
-  numero di misurazioni.
+  del giorno, colorata secondo la categoria della media del giorno; tooltip con minimo, media e massimo di ciascun
+  valore.
 - **Misurazioni esatte**: finché il recorder le conserva (10 giorni di default) lo storico è costruito dalle
   misurazioni reali; i giorni più vecchi arrivano dalle statistiche a lungo termine. I valori ripristinati
   dopo un riavvio non contano come misurazioni.
 - **Helper facoltativi con un clic**: per uno storico giornaliero esatto e permanente e per avere l'ora
   dell'ultima misurazione nelle automazioni. Vedi [Facoltativo: helper per storico e automazioni](#facoltativo-helper-per-storico-e-automazioni).
-- **Battito**, **media di 7 giorni** e **ora dell'ultima misurazione**.
+- **Battito**, **ora dell'ultima misurazione** e, a scelta, **media di 7 giorni**.
 - **Italiano e inglese**, secondo la lingua e il formato delle date del profilo di Home Assistant.
 - **Aspetto nativo**: colori del tema, modalità chiara e scura, layout a sezioni, accessibile da tastiera,
   editor visuale per ogni opzione.
@@ -86,9 +86,9 @@ Tutte le opzioni sono facoltative e disponibili nell'editor visuale.
 | `guideline` | `esh_2023` (`acc_aha_2025` se il paese di Home Assistant sono gli Stati Uniti) | `esh_2023`, `esc_2024` o `acc_aha_2025`. |
 | `title` | "Pressione arteriosa" (tradotto) | Titolo della card. |
 | `icon` | `mdi:heart-pulse` | Icona dell'intestazione. |
-| `history_days` | `30` | Giorni del grafico storico (7–365). |
+| `history_days` | `60` | Giorni del grafico storico (7–365). |
 | `show_history` | `true` | Grafico dello storico giornaliero. |
-| `show_average` | `true` | Media 7 giorni: media delle medie giornaliere degli ultimi 7 giorni. |
+| `show_average` | `false` | Media 7 giorni: media delle medie giornaliere degli ultimi 7 giorni. |
 | `show_reference` | `true` | Limite superiore della categoria più bassa della linea guida. |
 | `last_entity` | – | `input_datetime` con data e ora dell'ultima misurazione ([helper](#facoltativo-helper-per-storico-e-automazioni)). |
 | `systolic_today_entity` | – | Sensore con la sistolica di oggi, le cui statistiche giornaliere alimentano lo storico ([helper](#facoltativo-helper-per-storico-e-automazioni)). |
@@ -111,6 +111,10 @@ Valori in mmHg. Una misurazione assume la categoria più alta raggiunta da uno d
 | Ipertensione di grado 1 | 140–159 | e/o | 90–99 |
 | Ipertensione di grado 2 | 160–179 | e/o | 100–109 |
 | Ipertensione di grado 3 | ≥ 180 | e/o | ≥ 110 |
+
+Le fasce ESH hanno cinque segmenti sulle scale 90–190 e 50–120 mmHg: il grado 3 non ha un segmento
+proprio, quindi una misurazione di 180/110 o più si trova in fondo al segmento rosso ed è indicata come
+*Ipertensione 3*.
 
 **ESC 2024** (European Society of Cardiology) [2]
 
@@ -142,10 +146,10 @@ Valori in mmHg. Una misurazione assume la categoria più alta raggiunta da uno d
   misurazione.
 - **Giorni più vecchi**: prima dell'inizio della cronologia del recorder la card usa le statistiche
   giornaliere a lungo termine e mostra solo i giorni in cui il valore si è mosso (un giorno piatto è la
-  misurazione precedente che prosegue). Questi giorni sono leggermente sbiaditi e indicati come *stimato
-  dalle statistiche*: l'intervallo può includere la misurazione precedente e la media è pesata sul tempo.
-- **Con gli helper** (facoltativi) vengono prima le statistiche giornaliere dei due sensori "di oggi":
-  giorni indicati come *dai sensori giornalieri*, non sbiaditi. In ordine di precedenza, per ogni giorno:
+  misurazione precedente che prosegue). In questi giorni l'intervallo può includere la misurazione
+  precedente e la media è pesata sul tempo.
+- **Con gli helper** (facoltativi) vengono prima le statistiche giornaliere dei due sensori "di oggi". In
+  ordine di precedenza, per ogni giorno:
   - dopo il primo giorno della cronologia del recorder: le misurazioni esatte, poi gli helper;
   - in quel primo giorno, la cui cronologia può essere parziale: gli helper, poi le misurazioni, poi le
     statistiche;

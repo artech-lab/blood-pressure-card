@@ -142,8 +142,16 @@ assert.equal(await q("#v_dia"), "81");
 assert.equal(await q("#chip"), "Normal");
 assert.equal(await q("#rz_sys"), "Normal");
 assert.equal(await q("#pv"), "66 bpm");
-assert.match(await q("#hsub"), /^ESH 2023 guideline . measured just now$/);
-assert.equal(await q("#ref"), "Optimal: below 120/80 mmHg");
+assert.match(await q("#hsub"), /^ESC\/ESH guidelines . measured just now$/);
+assert.equal(await q("#ref"), "Optimal: below 120/80 mmHg (ESC)");
+assert.equal(await q(".histhead"), "60-day history");
+assert.equal(await hidden("#avg"), true, "the 7-day average is off by default");
+assert.equal(await page.evaluate(() => window.card.shadowRoot.querySelectorAll("#row_sys .seg").length), 5, "five ESH segments");
+assert.deepEqual(await page.evaluate(() => [...window.card.shadowRoot.querySelectorAll("#row_sys .tick")].map((t) => t.textContent)),
+  ["120", "130", "140", "160"]);
+assert.deepEqual(await page.evaluate(() => [...window.card.shadowRoot.querySelectorAll("#row_dia .tick")].map((t) => t.textContent)),
+  ["80", "85", "90", "100"]);
+assert.equal(await page.evaluate(() => window.card.shadowRoot.querySelector("#big .chip") !== null), true, "the chip is in the clickable row");
 assert.deepEqual(await page.evaluate(() => window.__log.ws.sort()),
   ["history/history_during_period", "recorder/statistics_during_period"]);
 console.log("ok - discovery and rendering");
@@ -151,6 +159,11 @@ console.log("ok - discovery and rendering");
 // 2. history: two exact days, the statistics day before the history, the restore ignored
 const capsules = await page.evaluate(() => window.card._points.map((p) => p.x.source + ":" + (p.x.count || "-")));
 assert.deepEqual(capsules, ["statistics:-", "readings:1", "readings:1"]);
+assert.equal(await page.evaluate(() => window.card.shadowRoot.querySelectorAll("svg line[opacity='0.6']").length), 0,
+  "statistics days at full opacity");
+await page.evaluate(() => window.mount({ show_average: true }, window.makeHass("en")));
+await settle();
+assert.equal(await hidden("#avg"), false);
 assert.equal(await q("#av"), "132/85", "mean of the two exact days (the statistics day is older than 7 days)");
 console.log("ok - history");
 
@@ -162,7 +175,10 @@ await page.evaluate(() => {
   svg.dispatchEvent(new MouseEvent("mousemove", { clientX: r.left + p.cx * r.width / 480, clientY: r.top + 50 }));
 });
 assert.match(await q("#tip"), /SYS min 126 . avg 126 . max 126/);
-assert.match(await q("#tip"), /1 reading$/);
+assert.equal(await page.evaluate(() => window.card.shadowRoot.querySelectorAll("#tip > div").length), 3, "header, SYS and DIA only");
+const tiph = await q("#tip .tiph");
+const today = new Date();
+assert.equal(tiph, today.toLocaleDateString("en", { weekday: "short" }) + " " + today.getDate() + "/" + (today.getMonth() + 1) + " Normal");
 console.log("ok - tooltip");
 
 // 3b. history with the "today" helpers: helper days before and on the start day of the raw history
@@ -186,16 +202,15 @@ const tipAt = (i) => page.evaluate((i) => {
 }, i);
 const tip1 = await tipAt(1);
 assert.match(tip1, /SYS min 141 . avg 141 . max 141/);
-assert.match(tip1, /from the daily sensors$/);
-assert.equal(await page.evaluate(() => window.card.shadowRoot.querySelectorAll("svg line[opacity='0.6']").length), 2,
-  "only the two capsules of the statistics day are faded");
+assert.doesNotMatch(tip1, /reading|sensors|statistics/, "no source line in the tooltip");
 assert.match(await q("#hsub"), /measured just now$/, "the last reading in the history is more recent than the helper");
 // without raw history the time comes from the helper
 await page.evaluate((cfg) => window.mount(cfg, window.makeHass("it", { helpers: true, noRaw: true })), TODAY);
 await settle();
-assert.match(await q("#hsub"), /misurata 3 ore fa$/);
+assert.match(await q("#hsub"), /^linee guida ESC\/ESH . misura 3 h fa$/);
 assert.deepEqual(await page.evaluate(() => window.card._points.map((p) => p.x.source)), ["statistics", "helpers", "helpers"]);
-assert.match(await tipAt(2), /dai sensori giornalieri$/);
+assert.match(await tipAt(2), /^\S+ \d+\/\d+ \S+/);
+assert.match(await tipAt(2), /SYS min \d+ . media \d+ . max \d+DIA min/);
 // a new measurement recorded in the helper reloads the history
 const before = await page.evaluate(() => window.__log.ws.length);
 await page.evaluate(() => {
@@ -206,7 +221,7 @@ await page.evaluate(() => {
 });
 await settle();
 assert.equal(await page.evaluate(() => window.__log.ws.length), before + 2);
-assert.match(await q("#hsub"), /misurata adesso$/);
+assert.match(await q("#hsub"), /misura adesso$/);
 console.log("ok - history with helpers");
 
 // 4. more-info from a click and from the keyboard
@@ -230,6 +245,57 @@ assert.equal(await hidden("#pulse"), true, "no pulse is guessed for configured s
 assert.equal(await hidden("#avg"), true, "no day in the last week");
 console.log("ok - Italian, guideline, previous options");
 
+// 5b. ESH grade 3 (185/112): five segments, the marker at the end of the red one
+await page.evaluate(() => window.mount({ show_average: true }, window.makeHass("it", { sys: 185, dia: 112 })));
+await settle();
+assert.equal(await q("#chip"), "Ipertensione 3");
+assert.equal(await q("#rz_sys"), "Ipertensione 3");
+assert.equal(await q("#rz_dia"), "Ipertensione 3");
+assert.equal(await q("#ref"), "Ottimale: sotto 120/80 mmHg (ESC)");
+assert.equal(await q(".histhead"), "Storico 60 giorni");
+const g3 = await page.evaluate(() => {
+  const r = window.card.shadowRoot;
+  const pos = (k) => {
+    const segs = [...r.querySelectorAll("#row_" + k + " .seg")];
+    const red = segs[segs.length - 1].getBoundingClientRect(), band = r.querySelector("#row_" + k + " .band").getBoundingClientRect();
+    const mk = r.getElementById(k + "_mk");
+    const c = mk.getBoundingClientRect();
+    return { segs: segs.length, inRed: c.left + c.width / 2 >= red.left && c.left + c.width / 2 <= band.right + 0.5,
+      left: parseFloat(mk.style.left), color: mk.style.background, chip: r.getElementById("chip").style.background,
+      redEnd: Math.abs(red.right - band.right) < 0.5 };
+  };
+  return { sys: pos("sys"), dia: pos("dia") };
+});
+assert.equal(g3.sys.segs, 5);
+assert.equal(g3.sys.redEnd, true, "the red segment reaches the end of the scale");
+assert.equal(g3.sys.inRed, true, "systolic marker in the red segment");
+assert.equal(g3.dia.inRed, true, "diastolic marker in the red segment");
+assert.equal(g3.sys.left, 95);
+assert.match(g3.sys.chip, /blood-pressure-severe-color/);
+assert.match(g3.sys.color, /blood-pressure-severe-color/);
+// a value beyond the scale stays at its end
+await page.evaluate(() => window.mount({}, window.makeHass("en", { sys: 230, dia: 135 })));
+await settle();
+assert.deepEqual(await page.evaluate(() => [parseFloat(window.card.shadowRoot.getElementById("sys_mk").style.left),
+  parseFloat(window.card.shadowRoot.getElementById("dia_mk").style.left)]), [100, 100]);
+assert.equal(await q("#chip"), "Hypertension 3");
+console.log("ok - ESH grade 3");
+
+// 5c. missing values: only the dashes, no waiting line
+await page.evaluate(() => { const h = window.makeHass("en"); h.states["sensor.arm_monitor_systolic"].state = "unknown";
+  h.states["sensor.arm_monitor_diastolic"].state = "unavailable"; window.mount({}, h); });
+await settle();
+assert.equal(await q("#v_sys"), "--");
+assert.equal(await q("#v_dia"), "--");
+assert.equal(await hidden("#chip"), true);
+assert.equal(await page.evaluate(() => window.card.shadowRoot.getElementById("wait")), null);
+assert.doesNotMatch(await page.evaluate(() => window.card.shadowRoot.querySelector("ha-card").textContent), /Waiting/);
+// the whole value row opens the systolic sensor, also from the keyboard
+await page.evaluate(() => { window.__log.more = []; window.card.shadowRoot.querySelector("#big .bigunit").click();
+  window.card.shadowRoot.getElementById("big").dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true, composed: true })); });
+assert.deepEqual(await page.evaluate(() => window.__log.more), ["sensor.arm_monitor_systolic", "sensor.arm_monitor_systolic"]);
+console.log("ok - missing values and value row");
+
 // 6. no sensors
 await page.evaluate(() => { const h = window.makeHass("en"); h.states = {}; h.entities = {}; window.mount({}, h); });
 assert.equal(await q(".empty .t"), "No blood pressure sensors found");
@@ -247,14 +313,16 @@ const cfg = await page.evaluate(async () => {
   const form = ed.querySelector("ha-form");
   const labels = [form.computeLabel({ name: "guideline" }), form.computeLabel({ name: "history_days" })];
   const data = form.data;
-  form.dispatchEvent(new CustomEvent("value-changed", { detail: { value: Object.assign({}, data, { title: "", history_days: 60 }) } }));
-  return { out, labels, guideline: data.guideline };
+  const shown = [data.history_days, data.show_average];
+  form.dispatchEvent(new CustomEvent("value-changed", { detail: { value: Object.assign({}, data, { title: "", history_days: 90 }) } }));
+  return { out, labels, guideline: data.guideline, shown };
 });
 assert.deepEqual(cfg.labels, ["Linea guida di classificazione", "Giorni di storico"]);
 assert.equal(cfg.guideline, "esh_2023");
 assert.equal(cfg.out.systolic_entity, "sensor.arm_monitor_systolic");
-assert.equal(cfg.out.history_days, 60);
-assert.ok(!("sys_entity" in cfg.out) && !("title" in cfg.out) && !("show_history" in cfg.out));
+assert.deepEqual(cfg.shown, [60, false], "the editor shows the new defaults");
+assert.equal(cfg.out.history_days, 90);
+assert.ok(!("sys_entity" in cfg.out) && !("title" in cfg.out) && !("show_history" in cfg.out) && !("show_average" in cfg.out));
 console.log("ok - editor");
 
 // 8. editor: the "Create helpers" button

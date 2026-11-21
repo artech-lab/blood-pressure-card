@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Look realigned with the original inline card (v2.0.2), with every current feature kept:
+  - ESH 2023 bands with five segments on the scales 90–190 and 50–120 mmHg, as in the original; the
+    classification keeps grade 3, shown as *Hypertension 3* with the marker at the end of the red segment;
+  - spacing, tooltip and marker as in the original; the whole value row opens the systolic sensor and holds
+    the category chip;
+  - subtitle "ESC/ESH guidelines · measured 2 h ago", relative times "just now", "N min ago", "N h ago",
+    "N d ago", and reference "Optimal: below 120/80 mmHg (ESC)" (the other guidelines show their name);
+  - no "Waiting for the first reading" line: missing values show "--";
+  - history header "60-day history", Monday labels as day/month up to 90 days, days estimated from the
+    statistics at full opacity, tooltip with the weekday, the category and the SYS / DIA rows only.
+- New defaults: `history_days` 60 (was 30) and `show_average` false (was true).
+
 ## [1.1.0] - 2026-11-21
 
 ### Added
